@@ -1,39 +1,48 @@
-// Scripts/Gameplay/Goals/GoalTrigger.cs
 using UnityEngine;
+using System.Collections;
 
+[RequireComponent(typeof(Collider2D))]
 public class GoalTrigger : MonoBehaviour
 {
-    [Tooltip("Si esta es la portería del equipo BLUE, entonces un gol aquí suma a RED.")]
-    public TeamId belongsToTeam = TeamId.Blue;
+    [Header("Refs")]
+    public BallSpawner spawner;
 
-    [Header("Reset")]
-    public Transform kickoffPoint; // punto central para reanudar tras gol
-    public float pauseAfterGoal = 1.0f;
+    [Header("Timings (seconds)")]
+    public float respawnDelay = 1.5f;
+
+    bool busy;
+
+    void Awake()
+    {
+        var col = GetComponent<Collider2D>();
+        if (col && !col.isTrigger)
+            col.isTrigger = true;
+    }
 
     void OnTriggerEnter2D(Collider2D other)
     {
-        if (!other.CompareTag("Ball")) return;
+        // La pelota puede entrar con su collider trigger (hijo). Buscamos el BallController en el padre.
+        var ball = other.GetComponentInParent<BallController>();
+        if (!ball || busy) return;
 
-        // ¿Quién anota?
-        TeamId scoringTeam = (belongsToTeam == TeamId.Blue) ? TeamId.Red : TeamId.Blue;
-        ScoreManager.Instance.AddGoal(scoringTeam);
-
-        // Reset rápido del balón
-        StartCoroutine(GoalReset());
+        StartCoroutine(HandleGoal(ball));
     }
 
-    System.Collections.IEnumerator GoalReset()
+    IEnumerator HandleGoal(BallController ball)
     {
-        // Pequeña pausa “cinemática”
-        yield return new WaitForSeconds(pauseAfterGoal);
+        busy = true;
 
-        var ball = BallController.Instance;
-        if (!ball) yield break;
+        // 1) Debug en consola
+        Debug.Log("¡¡GOL!!");
 
-        ball.Drop();
-        ball.transform.position = kickoffPoint ? kickoffPoint.position : Vector3.zero;
+        // 2) Destruir pelota actual
+        if (spawner) spawner.Despawn(ball);
+        else Destroy(ball.gameObject);
 
-        var rb = ball.GetComponent<Rigidbody2D>();
-        if (rb) rb.linearVelocity = Vector2.zero;
+        // 3) Esperar y respawnear
+        yield return new WaitForSeconds(respawnDelay);
+        if (spawner) spawner.SpawnBall();
+
+        busy = false;
     }
 }

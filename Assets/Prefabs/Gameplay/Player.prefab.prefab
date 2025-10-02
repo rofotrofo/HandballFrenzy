@@ -117,7 +117,7 @@ Rigidbody2D:
   m_Interpolate: 1
   m_SleepingMode: 1
   m_CollisionDetection: 0
-  m_Constraints: 0
+  m_Constraints: 4
 --- !u!61 &8679649771915653213
 BoxCollider2D:
   m_ObjectHideFlags: 0
@@ -178,7 +178,11 @@ MonoBehaviour:
   m_EditorClassIdentifier: 
   speed: 5
   teamId: 0
-  ballAnchor: {fileID: 0}
+  ballAnchor: {fileID: 6927971241450965666}
+  opponentGoal: {fileID: 0}
+  passTarget: {fileID: 0}
+  passTargetTransform: {fileID: 0}
+  autoPickClosestTeammateIfNoTarget: 1
 --- !u!1 &2147103095550678657
 GameObject:
   m_ObjectHideFlags: 0

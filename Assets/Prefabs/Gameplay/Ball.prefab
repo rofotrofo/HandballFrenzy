@@ -206,3 +206,8 @@ MonoBehaviour:
   shotSpeed: 13
   stickSmoothing: 25
   pickupBlockSeconds: 0.2
+  solidCollider: {fileID: 0}
+  triggerCollider: {fileID: 0}
+  passGhostExtraBuffer: 0.15
+  passGhostMax: 1
+  passGhostMin: 0.15

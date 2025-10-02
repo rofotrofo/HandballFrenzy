@@ -1,5 +1,6 @@
 using UnityEngine;
 using System;
+using System.Collections.Generic;
 
 [RequireComponent(typeof(Rigidbody2D))]
 public class BallController : MonoBehaviour
@@ -22,6 +23,14 @@ public class BallController : MonoBehaviour
     [Tooltip("Collider Trigger en capa BallTrigger, para pickup y gol")]
     public Collider2D triggerCollider;
 
+    [Header("Ghost pass")]
+    [Tooltip("Margen extra que se suma al tiempo de viaje para el ghost (s)")]
+    public float passGhostExtraBuffer = 0.15f;
+    [Tooltip("Límite superior del tiempo de ghost (s)")]
+    public float passGhostMax = 1.0f;
+    [Tooltip("Límite inferior del tiempo de ghost (s)")]
+    public float passGhostMin = 0.15f;
+
     private Rigidbody2D rb;
 
     public PlayerController Owner { get; private set; }
@@ -29,6 +38,13 @@ public class BallController : MonoBehaviour
 
     private float pickupBlockUntil;
     private bool IsPossessed => Owner != null;
+
+    // Ghost: colliders ignorados (pasador + receptor)
+    private readonly List<Collider2D> _temporarilyIgnored = new();
+    private float _passGhostEndsAt = -1f;
+
+    // Quién debería recibir este pase (para permitir pickup aunque haya cooldown)
+    private PlayerController _intendedReceiver = null;
 
     void Awake()
     {
@@ -40,44 +56,55 @@ public class BallController : MonoBehaviour
         rb.collisionDetectionMode = CollisionDetectionMode2D.Continuous;
         rb.interpolation = RigidbodyInterpolation2D.Interpolate;
 
-        // Validaciones básicas
         if (!solidCollider) Debug.LogWarning("[BallController] Falta asignar solidCollider.");
         if (!triggerCollider) Debug.LogWarning("[BallController] Falta asignar triggerCollider.");
     }
 
     void Update()
     {
-        // Cuando está poseída, seguimos el anchor suavemente y NO dejamos velocidad residual
+        // Seguir al dueño
         if (IsPossessed && Owner && Owner.ballAnchor)
         {
             Vector3 target = Owner.ballAnchor.position;
             transform.position = Vector3.Lerp(transform.position, target, Time.deltaTime * stickSmoothing);
             rb.linearVelocity = Vector2.zero;
         }
+
+        // Expira ventana de ghost por tiempo
+        if (_passGhostEndsAt > 0f && Time.time >= _passGhostEndsAt)
+            EndPassGhost();
     }
 
     // Este callback debe venir del collider en capa BallTrigger (Trigger=ON)
     void OnTriggerEnter2D(Collider2D other)
     {
-        if (Time.time < pickupBlockUntil) return;
+        // Permite pickup AUN CON COOLDOWN si es el receptor intencionado
         if (IsPossessed) return;
 
         if (other.CompareTag("Player"))
         {
             var pc = other.GetComponent<PlayerController>();
-            if (pc) Take(pc);
+            if (!pc) return;
+
+            // Si no ha pasado el cooldown pero es el receptor del pase, dejar tomar
+            if (Time.time < pickupBlockUntil && pc != _intendedReceiver)
+                return;
+
+            Take(pc);
         }
     }
 
-    // ----------------- API pública -----------------
+    // --------- API ---------
     public void Take(PlayerController newOwner)
     {
         Owner = newOwner;
-
-        // Desactivamos física "sólida" mientras está pegada al jugador
         SetPossessedPhysics(true);
-
         rb.linearVelocity = Vector2.zero;
+
+        // Al atraparla, cancelamos ghost y limpiamos receptor objetivo
+        EndPassGhost();
+        _intendedReceiver = null;
+
         OnOwnerChanged?.Invoke(Owner);
     }
 
@@ -86,24 +113,60 @@ public class BallController : MonoBehaviour
         if (!IsPossessed) return;
         Owner = null;
 
-        // Reactivar física normal
         SetPossessedPhysics(false);
+        EndPassGhost();
+        _intendedReceiver = null;
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
     }
 
-    public void Pass(Vector2 dir)
+    // Pase con dirección simple; puede ignorar al pasador si se provee
+    public void Pass(Vector2 dir, PlayerController passer = null)
     {
         if (!IsPossessed) return;
         Owner = null;
 
-        // Reactivar física y lanzar
         SetPossessedPhysics(false);
         rb.linearVelocity = dir.normalized * passSpeed;
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
+
+        _intendedReceiver = null; // sin receptor explícito
+        if (passer) BeginPassGhost(duration: passGhostMin, players: passer); else EndPassGhost();
+    }
+
+    /// <summary>
+    /// Pase dirigido a una posición, ignorando colisiones con receptor y pasador.
+    /// Ghost dura distancia/velocidad + buffer (clamp a [min, max]).
+    /// </summary>
+    public void PassTo(Vector2 targetPos, PlayerController intendedReceiver, PlayerController passer)
+    {
+        if (!IsPossessed) return;
+        Owner = null;
+
+        SetPossessedPhysics(false);
+
+        Vector2 toTarget = targetPos - (Vector2)transform.position;
+        Vector2 dir = toTarget.sqrMagnitude > 0.0001f ? toTarget.normalized : Vector2.zero;
+        rb.linearVelocity = dir * passSpeed;
+
+        OnOwnerChanged?.Invoke(Owner);
+        pickupBlockUntil = Time.time + pickupBlockSeconds;
+
+        // Configura receptor objetivo (para saltarnos cooldown si llega antes)
+        _intendedReceiver = intendedReceiver;
+
+        // Duración de ghost = tiempo de viaje + buffer, clamped
+        float travelTime = (passSpeed > 0f) ? (toTarget.magnitude / passSpeed) : 0.0f;
+        float ghostDuration = Mathf.Clamp(travelTime + Mathf.Max(0.05f, passGhostExtraBuffer),
+                                          passGhostMin, passGhostMax);
+
+        if (intendedReceiver || passer)
+            BeginPassGhost(ghostDuration, intendedReceiver, passer);
+        else
+            EndPassGhost();
     }
 
     public void Shoot(Vector2 dir, float power01 = 1f)
@@ -117,6 +180,9 @@ public class BallController : MonoBehaviour
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
+
+        EndPassGhost();
+        _intendedReceiver = null;
     }
 
     public void ResetToPosition(Vector3 pos)
@@ -125,18 +191,16 @@ public class BallController : MonoBehaviour
         transform.position = pos;
         rb.linearVelocity = Vector2.zero;
         SetPossessedPhysics(false);
+        EndPassGhost();
+        _intendedReceiver = null;
+
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = 0f;
     }
 
-    // ----------------- Helpers -----------------
-    /// <summary>
-    /// true: poseída (stick) → Kinematic + collider sólido OFF
-    /// false: libre → Dynamic + collider sólido ON
-    /// </summary>
+    // --------- Helpers ---------
     private void SetPossessedPhysics(bool possessed)
     {
-        // El trigger SIEMPRE debe quedar ON para pickup/gol
         if (triggerCollider && !triggerCollider.isTrigger)
             triggerCollider.isTrigger = true;
 
@@ -149,5 +213,48 @@ public class BallController : MonoBehaviour
 
         if (solidCollider)
             solidCollider.enabled = !possessed;
+    }
+
+    private void BeginPassGhost(float duration, params PlayerController[] players)
+    {
+        EndPassGhost(); // limpia por si había algo anterior
+        if (!solidCollider) { _passGhostEndsAt = -1f; return; }
+
+        foreach (var p in players)
+        {
+            if (!p) continue;
+            var cols = p.GetComponentsInChildren<Collider2D>();
+            foreach (var c in cols)
+            {
+                if (!c || !c.enabled) continue;
+                Physics2D.IgnoreCollision(solidCollider, c, true);
+                _temporarilyIgnored.Add(c);
+            }
+        }
+
+        _passGhostEndsAt = Time.time + Mathf.Max(passGhostMin, duration);
+    }
+
+    private void BeginPassGhost(params PlayerController[] players)
+    {
+        BeginPassGhost(passGhostMin, players);
+    }
+
+    private void EndPassGhost()
+    {
+        if (!solidCollider)
+        {
+            _temporarilyIgnored.Clear();
+            _passGhostEndsAt = -1f;
+            return;
+        }
+
+        foreach (var c in _temporarilyIgnored)
+        {
+            if (!c) continue;
+            Physics2D.IgnoreCollision(solidCollider, c, false);
+        }
+        _temporarilyIgnored.Clear();
+        _passGhostEndsAt = -1f;
     }
 }
