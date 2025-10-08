@@ -1,4 +1,5 @@
 using UnityEngine;
+using UnityEngine.InputSystem; // <- usamos Mouse.current
 
 [RequireComponent(typeof(Rigidbody2D))]
 public class PlayerController : MonoBehaviour
@@ -20,9 +21,7 @@ public class PlayerController : MonoBehaviour
 
     [Header("Directional Pass")]
     [Range(0f, 1f)] public float directionalInputThreshold = 0.2f;
-    [Tooltip("Tolerancia angular del sector cardinal (ej. 20°)")]
     [Range(1f, 45f)] public float directionalMaxAngleDeg = 20f;
-    [Tooltip("Avance mínimo en el eje elegido para contar como hacia 'adelante' (metros)")]
     [Min(0f)] public float directionalMinForward = 0.05f;
 
     [Header("Post Action")]
@@ -32,14 +31,27 @@ public class PlayerController : MonoBehaviour
     [Range(0f, 1f)] public float postActionSlipStartFactor = 0.6f;
     public float postActionSlipExtraDecel = 8f;
 
-    [Header("Targets (optional)")]
-    public Transform opponentGoal;
+    [Header("Targets (optional, legacy)")]
+    public Transform opponentGoal; // solo lo dejamos por compatibilidad (ActionShoot)
 
     [Header("Visual Facing (solo flip horizontal)")]
-    [Tooltip("Si lo asignas, solo este hijo gira 0/180°. Si está vacío, rota el propio Player.")]
     public Transform visualRoot;
-    [Tooltip("Umbral de input horizontal para decidir giro (0.15–0.25 recomendado)")]
     [Range(0f, 1f)] public float horizontalFaceThreshold = 0.2f;
+
+    // ======== NUEVO: TIRO CON PUNTERÍA ENTRE POSTES (SIN PlayerInput EVENTS) ========
+    [Header("Shoot Aiming (posts)")]
+    public Transform leftPost;
+    public Transform rightPost;
+    [Tooltip("Flecha/puntero; déjala desactivada en el prefab")]
+    public Transform aimArrow;
+    [Tooltip("Ciclos por segundo de la oscilación (ida y vuelta)")]
+    public float aimOscillationHz = 1.2f;
+    [Tooltip("Si pierdes la posesión mientras apuntas, cancelamos")]
+    public bool autoCancelIfNoOwner = true;
+
+    private bool isAiming = false;
+    private float aimStartTime = 0f;
+    // ===============================================================================
 
     private Rigidbody2D rb;
     private Vector2 moveInput;
@@ -53,6 +65,8 @@ public class PlayerController : MonoBehaviour
         rb.gravityScale = 0f;
         rb.interpolation = RigidbodyInterpolation2D.Interpolate;
         TeamRegistry.Register(this);
+
+        if (aimArrow) aimArrow.gameObject.SetActive(false); // puntero oculto al inicio
     }
 
     void OnDestroy() => TeamRegistry.Unregister(this);
@@ -63,18 +77,50 @@ public class PlayerController : MonoBehaviour
         moveInput = v;
     }
 
-    // --- Flip 0°/180° según input horizontal (no rota al iniciar ni con input vertical) ---
     void Update()
     {
-        // Horizontal dominante y por encima del umbral -> girar
+        // ---- Flip 0°/180° según input horizontal (tu comportamiento actual) ----
         if (Mathf.Abs(moveInput.x) >= horizontalFaceThreshold && Mathf.Abs(moveInput.x) >= Mathf.Abs(moveInput.y))
         {
             var t = visualRoot ? visualRoot : transform;
             var e = t.eulerAngles;
-            float z = (moveInput.x > 0f) ? 0f : 180f; // derecha = 0°, izquierda = 180°
+            float z = (moveInput.x > 0f) ? 0f : 180f;
             t.rotation = Quaternion.Euler(e.x, e.y, z);
         }
-        // Si el input es vertical o menor al umbral, NO cambiamos la rotación
+
+        // ---- INPUT DEL MOUSE para TIRO (sin PlayerInput events) ----
+        var mouse = Mouse.current;
+        if (mouse != null)
+        {
+            if (mouse.rightButton.wasPressedThisFrame)
+                BeginAimShot();      // presionaste: empezar a apuntar
+            if (mouse.rightButton.wasReleasedThisFrame)
+                ConfirmAimShot();    // soltaste: disparar
+        }
+
+        // ---- Actualizar puntero si estamos apuntando ----
+        if (isAiming && leftPost && rightPost && aimArrow)
+        {
+            float t = Mathf.PingPong((Time.time - aimStartTime) * aimOscillationHz, 1f);
+            Vector3 pos = Vector3.Lerp(leftPost.position, rightPost.position, t);
+            aimArrow.position = pos;
+
+            // orientar flecha hacia la pelota (se ve más claro)
+            var ball = BallController.Instance;
+            if (ball)
+            {
+                Vector2 dir = (Vector2)pos - (Vector2)ball.transform.position;
+                if (dir.sqrMagnitude > 0.0001f)
+                {
+                    float ang = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f;
+                    aimArrow.rotation = Quaternion.Euler(0, 0, ang);
+                }
+
+                // cancelar si ya no soy el dueño mientras apunto
+                if (autoCancelIfNoOwner && ball.Owner != this)
+                    CancelAimShot();
+            }
+        }
     }
 
     void FixedUpdate()
@@ -140,7 +186,7 @@ public class PlayerController : MonoBehaviour
         moveInput = Vector2.zero;
     }
 
-    // ===== ACCIONES =====
+    // ===================== PASSE / DROP (sin cambios) =====================
 
     public void ActionPass()
     {
@@ -154,54 +200,70 @@ public class PlayerController : MonoBehaviour
 
         if (raw.sqrMagnitude >= directionalInputThreshold * directionalInputThreshold)
         {
-            // Cardinal estricta por componente dominante
             Vector2 dir = Mathf.Abs(raw.x) >= Mathf.Abs(raw.y)
-                ? new Vector2(Mathf.Sign(raw.x), 0f)   // izquierda/derecha
-                : new Vector2(0f, Mathf.Sign(raw.y));  // abajo/arriba
+                ? new Vector2(Mathf.Sign(raw.x), 0f)
+                : new Vector2(0f, Mathf.Sign(raw.y));
 
             target = TeamRegistry.GetClosestTeammateInCardinal(
-                this,
-                dir,
-                directionalMaxAngleDeg,   // tolerancia angular pequeña (p.ej. 20°)
-                directionalMinForward     // avance mínimo en ese eje
-            );
+                this, dir, directionalMaxAngleDeg, directionalMinForward);
         }
 
-        if (!target)
-            target = TeamRegistry.GetClosestTeammate(this);
-
-        if (!target)
-        {
-            ball.Pass(transform.up, passer: this);
-            return;
-        }
+        if (!target) target = TeamRegistry.GetClosestTeammate(this);
+        if (!target) { BallController.Instance.Pass(transform.up, passer: this); return; }
 
         Vector2 to = target.ballAnchor ? (Vector2)target.ballAnchor.position
                                        : (Vector2)target.transform.position;
 
-        ball.PassTo(to, intendedReceiver: target, passer: this);
-    }
-
-    public void ActionShoot()
-    {
-        var ball = BallController.Instance;
-        if (!ball || ball.Owner != this) return;
-
-        if (stopOnRelease) Halt();
-
-        Vector2 dir = opponentGoal
-            ? ((Vector2)opponentGoal.position - (Vector2)ball.transform.position).normalized
-            : (Vector2)transform.up;
-
-        ball.Shoot(dir, 1f);
+        BallController.Instance.PassTo(to, intendedReceiver: target, passer: this);
     }
 
     public void ActionDrop()
     {
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
-
         if (stopOnRelease) Halt();
         ball.Drop();
+    }
+
+    // ====================== TIRO ======================
+
+    /// Legacy: tiro directo (por compatibilidad si algo lo llama)
+    public void ActionShoot()
+    {
+        BeginAimShot();
+    }
+
+    // ---- Nuevo esquema: control interno con Mouse ----
+    private void BeginAimShot()
+    {
+        var ball = BallController.Instance;
+        if (!ball || ball.Owner != this) return;
+        if (!leftPost || !rightPost || !aimArrow) return;
+
+        isAiming = true;
+        aimStartTime = Time.time;
+        aimArrow.gameObject.SetActive(true);
+    }
+
+    private void ConfirmAimShot()
+    {
+        var ball = BallController.Instance;
+        if (!isAiming || !ball || ball.Owner != this) { CancelAimShot(); return; }
+        if (!leftPost || !rightPost) { CancelAimShot(); return; }
+
+        float t = Mathf.PingPong((Time.time - aimStartTime) * aimOscillationHz, 1f);
+        Vector2 aimPoint = Vector2.Lerp(leftPost.position, rightPost.position, t);
+        Vector2 dir = (aimPoint - (Vector2)ball.transform.position).normalized;
+
+        if (stopOnRelease) Halt();
+        ball.Shoot(dir, 1f);
+
+        CancelAimShot();
+    }
+
+    private void CancelAimShot()
+    {
+        isAiming = false;
+        if (aimArrow) aimArrow.gameObject.SetActive(false);
     }
 }
