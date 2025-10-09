@@ -1,40 +1,61 @@
+using System.Collections.Generic;
 using UnityEngine;
-
-public enum ArenaType { Wood, Sand, Ice }
 
 public class ArenaManager : MonoBehaviour
 {
-    [Header("Arena roots (activa solo una)")]
-    public GameObject woodArenaRoot;  // duela (normal)
-    public GameObject sandArenaRoot;  // arena (SurfaceZone2D)
-    public GameObject iceArenaRoot;   // hielo (IceZone2D)
+    public enum ArenaType { Wood = 0, Ice = 1, Sand = 2 }
 
-    [Header("UI (opcional)")]
-    public TMPro.TextMeshProUGUI arenaLabel;
+    [Header("Prefabs de Cancha")]
+    public GameObject woodPrefab;
+    public GameObject icePrefab;
+    public GameObject sandPrefab;
 
-    [Header("Start Arena")]
+    [Header("Spawn")]
+    public Transform spawnPoint;              // centro de la cancha
+    public bool keepRotation = false;         // si tus canchas necesitan rotación específica
+
+    [Header("Jugadores a ajustar")]
+    public List<PlayerController> players = new List<PlayerController>(); // arrastra aquí tus PlayerController
+
+    [Header("Arranque")]
     public ArenaType startArena = ArenaType.Wood;
 
-    void Start() => SetArena(startArena);
+    GameObject _currentArena;
 
-    public void SetArena(ArenaType type)
+    void Start()
     {
-        if (woodArenaRoot) woodArenaRoot.SetActive(type == ArenaType.Wood);
-        if (sandArenaRoot) sandArenaRoot.SetActive(type == ArenaType.Sand);
-        if (iceArenaRoot)  iceArenaRoot.SetActive(type == ArenaType.Ice);
-
-        if (arenaLabel)
-            arenaLabel.text = type switch
-            {
-                ArenaType.Wood => "Duela",
-                ArenaType.Sand => "Arena",
-                ArenaType.Ice  => "Hielo",
-                _ => ""
-            };
+        LoadArena(startArena);
     }
 
-    // Llamable desde botones para probar
-    public void SetWood() => SetArena(ArenaType.Wood);
-    public void SetSand() => SetArena(ArenaType.Sand);
-    public void SetIce()  => SetArena(ArenaType.Ice);
+    // Para conectar a botones sin parámetros
+    public void LoadWood() => LoadArena(ArenaType.Wood);
+    public void LoadIce()  => LoadArena(ArenaType.Ice);
+    public void LoadSand() => LoadArena(ArenaType.Sand);
+
+    // Para botones con int (0,1,2)
+    public void LoadArenaByIndex(int i) => LoadArena((ArenaType)Mathf.Clamp(i, 0, 2));
+
+    public void LoadArena(ArenaType type)
+    {
+        // Destruye la arena anterior
+        if (_currentArena) { Destroy(_currentArena); _currentArena = null; }
+
+        // Decide prefab
+        GameObject prefab = null;
+        switch (type)
+        {
+            case ArenaType.Wood: prefab = woodPrefab; break;
+            case ArenaType.Ice:  prefab = icePrefab;  break;
+            case ArenaType.Sand: prefab = sandPrefab; break;
+        }
+        if (!prefab) { Debug.LogWarning($"[ArenaManager] Prefab no asignado para {type}"); return; }
+
+        // Instancia en spawn
+        Vector3 pos = spawnPoint ? spawnPoint.position : Vector3.zero;
+        Quaternion rot = keepRotation && spawnPoint ? spawnPoint.rotation : Quaternion.identity;
+        _currentArena = Instantiate(prefab, pos, rot);
+
+        // (Opcional) Reiniciar spawners/power-ups si dependen de la cancha:
+        // foreach (var sp in _currentArena.GetComponentsInChildren<PowerUpSpawner>(true)) { sp.StartHalf(); }
+    }
 }
