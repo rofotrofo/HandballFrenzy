@@ -282,6 +282,11 @@ MonoBehaviour:
   opponentGoal: {fileID: 0}
   visualRoot: {fileID: 0}
   horizontalFaceThreshold: 0.2
+  leftPost: {fileID: 0}
+  rightPost: {fileID: 0}
+  aimArrow: {fileID: 4787163267179050895}
+  aimOscillationHz: 1.2
+  autoCancelIfNoOwner: 1
 --- !u!1 &2147103095550678657
 GameObject:
   m_ObjectHideFlags: 0

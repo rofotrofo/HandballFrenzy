@@ -31,6 +31,27 @@ public class BallController : MonoBehaviour
     [Tooltip("Límite inferior del tiempo de ghost (s)")]
     public float passGhostMin = 0.15f;
 
+    [Header("Visuals")]
+    [SerializeField] private SpriteRenderer spriteRenderer;
+    [SerializeField] private Color normalColor = Color.white;
+    [SerializeField] private Color stoneColor = new Color(0.6f, 0.6f, 0.6f);
+
+    
+    //Stone Ball (Power-Up)
+    public enum BallMode { Normal, Stone }
+
+    [Header("Stone Ball (runtime)")]
+    [SerializeField] private BallMode _mode = BallMode.Normal;
+    [SerializeField] private float _stoneShotMul = 1.6f;
+    [SerializeField] private float _stonePassMul = 1.3f;
+    [SerializeField] private float _stoneReceiverKnockbackImpulse = 8f;
+    [SerializeField] private float _stoneUntil = -1f;
+
+    private enum LastLaunch { None, Pass, Shoot }
+    private LastLaunch _lastLaunch = LastLaunch.None;
+    private Vector2 _lastLinearVelocityBeforeCatch = Vector2.zero;
+    // ========================================
+
     private Rigidbody2D rb;
 
     public PlayerController Owner { get; private set; }
@@ -58,6 +79,9 @@ public class BallController : MonoBehaviour
 
         if (!solidCollider) Debug.LogWarning("[BallController] Falta asignar solidCollider.");
         if (!triggerCollider) Debug.LogWarning("[BallController] Falta asignar triggerCollider.");
+        
+        if (!spriteRenderer) spriteRenderer = GetComponent<SpriteRenderer>();
+
     }
 
     void Update()
@@ -73,6 +97,9 @@ public class BallController : MonoBehaviour
         // Expira ventana de ghost por tiempo
         if (_passGhostEndsAt > 0f && Time.time >= _passGhostEndsAt)
             EndPassGhost();
+
+        // Expirar power-up stone si corresponde
+        _ = IsStoneActive();
     }
 
     // Este callback debe venir del collider en capa BallTrigger (Trigger=ON)
@@ -97,6 +124,9 @@ public class BallController : MonoBehaviour
     // --------- API ---------
     public void Take(PlayerController newOwner)
     {
+        // Guardar velocidad de llegada ANTES de anularla al pegarse
+        _lastLinearVelocityBeforeCatch = rb ? rb.linearVelocity : Vector2.zero;
+
         Owner = newOwner;
         SetPossessedPhysics(true);
         rb.linearVelocity = Vector2.zero;
@@ -104,6 +134,9 @@ public class BallController : MonoBehaviour
         // Al atraparla, cancelamos ghost y limpiamos receptor objetivo
         EndPassGhost();
         _intendedReceiver = null;
+
+        // Aplicar knockback si corresponde (pase + stone activo)
+        TryApplyStoneKnockbackOnCatch(newOwner);
 
         OnOwnerChanged?.Invoke(Owner);
     }
@@ -119,6 +152,8 @@ public class BallController : MonoBehaviour
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
+
+        _lastLaunch = LastLaunch.None;
     }
 
     // Pase con dirección simple; puede ignorar al pasador si se provee
@@ -128,12 +163,18 @@ public class BallController : MonoBehaviour
         Owner = null;
 
         SetPossessedPhysics(false);
-        rb.linearVelocity = dir.normalized * passSpeed;
+
+        float v = passSpeed;
+        if (IsStoneActive()) v *= _stonePassMul;
+
+        rb.linearVelocity = dir.normalized * v;
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
 
         _intendedReceiver = null; // sin receptor explícito
+        _lastLaunch = LastLaunch.Pass;
+
         if (passer) BeginPassGhost(duration: passGhostMin, players: passer); else EndPassGhost();
     }
 
@@ -150,7 +191,11 @@ public class BallController : MonoBehaviour
 
         Vector2 toTarget = targetPos - (Vector2)transform.position;
         Vector2 dir = toTarget.sqrMagnitude > 0.0001f ? toTarget.normalized : Vector2.zero;
-        rb.linearVelocity = dir * passSpeed;
+
+        float v = passSpeed;
+        if (IsStoneActive()) v *= _stonePassMul;
+
+        rb.linearVelocity = dir * v;
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
@@ -159,9 +204,11 @@ public class BallController : MonoBehaviour
         _intendedReceiver = intendedReceiver;
 
         // Duración de ghost = tiempo de viaje + buffer, clamped
-        float travelTime = (passSpeed > 0f) ? (toTarget.magnitude / passSpeed) : 0.0f;
+        float travelTime = (v > 0f) ? (toTarget.magnitude / v) : 0.0f;
         float ghostDuration = Mathf.Clamp(travelTime + Mathf.Max(0.05f, passGhostExtraBuffer),
                                           passGhostMin, passGhostMax);
+
+        _lastLaunch = LastLaunch.Pass;
 
         if (intendedReceiver || passer)
             BeginPassGhost(ghostDuration, intendedReceiver, passer);
@@ -175,14 +222,19 @@ public class BallController : MonoBehaviour
         Owner = null;
 
         SetPossessedPhysics(false);
-        float v = Mathf.Lerp(shotSpeed * 0.7f, shotSpeed * 1.3f, Mathf.Clamp01(power01));
-        rb.linearVelocity = dir.normalized * v;
+
+        float baseV = Mathf.Lerp(shotSpeed * 0.7f, shotSpeed * 1.3f, Mathf.Clamp01(power01));
+        if (IsStoneActive()) baseV *= _stoneShotMul;
+
+        rb.linearVelocity = dir.normalized * baseV;
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
 
         EndPassGhost();
         _intendedReceiver = null;
+
+        _lastLaunch = LastLaunch.Shoot;
     }
 
     public void ResetToPosition(Vector3 pos)
@@ -196,6 +248,8 @@ public class BallController : MonoBehaviour
 
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = 0f;
+
+        _lastLaunch = LastLaunch.None;
     }
 
     // --------- Helpers ---------
@@ -256,5 +310,70 @@ public class BallController : MonoBehaviour
         }
         _temporarilyIgnored.Clear();
         _passGhostEndsAt = -1f;
+    }
+
+    // ======== Stone Ball: Activación / Expiración / Knockback ========
+
+    public void ActivateStoneBall(float duration, float shotMul, float passMul, float receiverImpulse)
+    {
+        _mode = BallMode.Stone;
+        _stoneShotMul = shotMul;
+        _stonePassMul = passMul;
+        _stoneReceiverKnockbackImpulse = receiverImpulse;
+        _stoneUntil = Time.time + Mathf.Max(0.01f, duration);
+        
+        if (spriteRenderer)
+            spriteRenderer.color = stoneColor;
+
+
+        // TODO: activar VFX/material/partículas de la pelota “de piedra”
+        // e.g., cambiar color, habilitar trail, etc.
+    }
+
+    private void DeactivateStoneBall()
+    {
+        _mode = BallMode.Normal;
+        _stoneUntil = -1f;
+        
+        if (spriteRenderer)
+            spriteRenderer.color = normalColor;
+
+
+        // TODO: desactivar VFX/material/partículas
+    }
+
+    private bool IsStoneActive()
+    {
+        if (_mode != BallMode.Stone) return false;
+        if (_stoneUntil > 0f && Time.time > _stoneUntil)
+        {
+            DeactivateStoneBall();
+            return false;
+        }
+        return true;
+    }
+
+    private void TryApplyStoneKnockbackOnCatch(PlayerController receiver)
+    {
+        // Solo si:
+        // - Stone activo
+        // - La pelota venía de un PASE
+        // - Tenemos receptor y su Rigidbody2D
+        if (!IsStoneActive()) return;
+        if (_lastLaunch != LastLaunch.Pass) return;
+        if (!receiver) return;
+
+        var recvRb = receiver.GetComponent<Rigidbody2D>();
+        if (!recvRb) return;
+
+        Vector2 arrival = _lastLinearVelocityBeforeCatch;
+        if (arrival.sqrMagnitude < 0.0001f) return;
+
+        Vector2 dir = arrival.normalized;
+        recvRb.AddForce(dir * _stoneReceiverKnockbackImpulse, ForceMode2D.Impulse);
+
+        // Después de aplicar, reseteamos el último lanzamiento
+        _lastLaunch = LastLaunch.None;
+        _lastLinearVelocityBeforeCatch = Vector2.zero;
     }
 }
