@@ -1,26 +1,30 @@
 using UnityEngine;
+using UnityEngine.SceneManagement;
+using System.Collections;
 
-[RequireComponent(typeof(Collider2D))]
 public class GoalTrigger : MonoBehaviour
 {
-    void Awake()
+    private bool restarting = false;
+
+    private void OnTriggerEnter2D(Collider2D other)
     {
-        // Aseguramos que el collider de la portería sea un Trigger
-        var col = GetComponent<Collider2D>();
-        if (col && !col.isTrigger)
-            col.isTrigger = true;
+        if (restarting) return;
+
+        BallController ball = other.GetComponentInParent<BallController>();
+        if (ball == null) return;
+
+        Debug.Log("⚽ GOL!");
+
+        Destroy(ball.gameObject);
+        StartCoroutine(RestartSceneAfterDelay(0.5f));
     }
 
-    void OnTriggerEnter2D(Collider2D other)
+    private IEnumerator RestartSceneAfterDelay(float delay)
     {
-        // Buscamos si el objeto que entró tiene un BallController (puede estar en el padre)
-        var ball = other.GetComponentInParent<BallController>();
-        if (!ball) return;
+        restarting = true;
+        yield return new WaitForSeconds(delay);
 
-        // Debug en consola
-        Debug.Log("¡¡GOL!!");
-
-        // Destruir la pelota
-        Destroy(ball.gameObject);
+        var activeScene = SceneManager.GetActiveScene();
+        SceneManager.LoadScene(activeScene.buildIndex);
     }
 }

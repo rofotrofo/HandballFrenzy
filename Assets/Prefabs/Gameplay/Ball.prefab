@@ -189,7 +189,7 @@ CircleCollider2D:
   m_CompositeOperation: 0
   m_CompositeOrder: 0
   m_Offset: {x: 0, y: 0}
-  m_Radius: 0.68
+  m_Radius: 0.7
 --- !u!114 &4525176989828187739
 MonoBehaviour:
   m_ObjectHideFlags: 0
@@ -206,8 +206,8 @@ MonoBehaviour:
   shotSpeed: 13
   stickSmoothing: 25
   pickupBlockSeconds: 0.2
-  solidCollider: {fileID: 0}
-  triggerCollider: {fileID: 0}
+  solidCollider: {fileID: 7614250021379657393}
+  triggerCollider: {fileID: 5685482712369075916}
   passGhostExtraBuffer: 0.15
   passGhostMax: 1
   passGhostMin: 0.15
