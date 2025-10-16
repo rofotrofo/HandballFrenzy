@@ -1,33 +1,30 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
-using System.Collections;
 
 public class GoalTrigger : MonoBehaviour
 {
-    private bool restarting = false;
+    [Header("Opcional")]
+    [Tooltip("Si está activo, destruye la pelota al cruzar la línea de gol.")]
+    [SerializeField] private bool destroyBallOnContact = true;
 
     private void OnTriggerEnter2D(Collider2D other)
     {
-        if (restarting) return;
+        var ball = other.GetComponentInParent<BallController>();
+        if (!ball) return;
 
-        BallController ball = other.GetComponentInParent<BallController>();
-        if (ball == null) return;
+        if (destroyBallOnContact)
+            Destroy(ball.gameObject);
 
-        Debug.Log("⚽ GOL!");
-        var goalUI = FindFirstObjectByType<GoalUIManager>();
+        // Flujo principal: delega en el MatchTimer
+        if (MatchTimer.Instance != null)
+        {
+            MatchTimer.Instance.OnGoalScored();
+            return;
+        }
+
+        // Fallback suave (por si aún no integras el MatchTimer):
+        var goalUI = Object.FindFirstObjectByType<GoalUIManager>();
         if (goalUI != null)
             goalUI.ShowGoal();
-
-        Destroy(ball.gameObject);
-        StartCoroutine(RestartSceneAfterDelay(0.5f));
-    }
-
-    private IEnumerator RestartSceneAfterDelay(float delay)
-    {
-        restarting = true;
-        yield return new WaitForSeconds(delay);
-
-        var activeScene = SceneManager.GetActiveScene();
-        SceneManager.LoadScene(activeScene.buildIndex);
+        // (En el flujo nuevo ya NO recargamos escena aquí; lo hace el MatchTimer)
     }
 }

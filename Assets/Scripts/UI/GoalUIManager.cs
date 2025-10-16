@@ -1,18 +1,15 @@
+// Assets/Scripts/UI/GoalUIManager.cs
 using UnityEngine;
 using System.Collections;
 
 public class GoalUIManager : MonoBehaviour
 {
-    [Header("Referencia al texto GOOOL dentro del Canvas")]
+    [Header("Texto/imagen GOOOOL dentro del Canvas")]
     public GameObject goalText;
 
-    [Header("Duración total del efecto (segundos)")]
+    [Header("Efecto")]
     public float duration = 1.5f;
-
-    [Header("Intensidad del temblor (px)")]
     public float shakeAmount = 15f;
-
-    [Header("Escala inicial y final")]
     public float startScale = 1f;
     public float endScale = 1.3f;
 
@@ -32,31 +29,30 @@ public class GoalUIManager : MonoBehaviour
     public void ShowGoal()
     {
         if (goalText != null)
-            StartCoroutine(ShowGoalRoutine());
+            StartCoroutine(Run());
     }
 
-    private IEnumerator ShowGoalRoutine()
+    private IEnumerator Run()
     {
         goalText.SetActive(true);
-        float elapsed = 0f;
+        float t = 0f;
 
-        while (elapsed < duration)
+        while (t < duration)
         {
-            elapsed += Time.deltaTime;
+            t += Time.deltaTime;
 
-            // Temblor aleatorio (Vector2)
+            // temblor
             float x = Random.Range(-shakeAmount, shakeAmount);
             float y = Random.Range(-shakeAmount, shakeAmount);
             rect.anchoredPosition = originalPos + new Vector2(x, y);
 
-            // Escala pulsante
-            float scale = Mathf.Lerp(startScale, endScale, Mathf.PingPong(elapsed * 3f, 1f));
-            rect.localScale = Vector3.one * scale;
+            // pulso escala
+            float s = Mathf.Lerp(startScale, endScale, Mathf.PingPong(t * 3f, 1f));
+            rect.localScale = Vector3.one * s;
 
             yield return null;
         }
 
-        // Restaurar posición y escala
         rect.anchoredPosition = originalPos;
         rect.localScale = Vector3.one;
         goalText.SetActive(false);
