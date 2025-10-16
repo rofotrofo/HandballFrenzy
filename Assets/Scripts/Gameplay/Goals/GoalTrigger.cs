@@ -14,6 +14,9 @@ public class GoalTrigger : MonoBehaviour
         if (ball == null) return;
 
         Debug.Log("⚽ GOL!");
+        var goalUI = FindFirstObjectByType<GoalUIManager>();
+        if (goalUI != null)
+            goalUI.ShowGoal();
 
         Destroy(ball.gameObject);
         StartCoroutine(RestartSceneAfterDelay(0.5f));
