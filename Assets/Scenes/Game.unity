@@ -1100,6 +1100,7 @@ MonoBehaviour:
   - {fileID: 1171253334}
   powerUpPrefabs:
   - {fileID: 2774797911566621521, guid: 4494059f8ad6ab24294a0c21c34d3807, type: 3}
+  - {fileID: 6808970099414741663, guid: ff37da6a2c38e2a4fb8f7e5c23f1c59a, type: 3}
   halfDurationSeconds: 90
   spawnIntervalSeconds: 7.5
   minSpawnsPerHalf: 2
@@ -1516,10 +1517,6 @@ PrefabInstance:
     - target: {fileID: 1615190496052692436, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
       propertyPath: m_Name
       value: Enemy
-      objectReference: {fileID: 0}
-    - target: {fileID: 5383862298677626885, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
-      propertyPath: m_GravityScale
-      value: 0
       objectReference: {fileID: 0}
     - target: {fileID: 6530885968213115731, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
       propertyPath: m_LocalPosition.x
@@ -2475,9 +2472,29 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 4525176989828187739, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
+      propertyPath: bombColor.b
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4525176989828187739, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
+      propertyPath: bombColor.g
+      value: 0
+      objectReference: {fileID: 0}
+    - target: {fileID: 4525176989828187739, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
+      propertyPath: bombColor.r
+      value: 1
+      objectReference: {fileID: 0}
+    - target: {fileID: 4525176989828187739, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
+      propertyPath: ignoreOwner
+      value: 1
+      objectReference: {fileID: 0}
     - target: {fileID: 6338456011791508462, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
       propertyPath: m_Name
       value: Ball
+      objectReference: {fileID: 0}
+    - target: {fileID: 6338456011791508462, guid: e7f9105d2273f3a40acceedcbfe21eaa, type: 3}
+      propertyPath: m_Layer
+      value: 0
       objectReference: {fileID: 0}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
