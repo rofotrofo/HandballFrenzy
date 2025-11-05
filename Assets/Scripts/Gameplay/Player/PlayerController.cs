@@ -48,16 +48,28 @@ public class PlayerController : MonoBehaviour
     private float aimStartTime = 0f;
 
     [Header("Selection Indicator")]
-    public GameObject hasBall;
+    public GameObject hasBall; // indicador de jugador seleccionado
 
     private Rigidbody2D rb;
+
+    // Input del jugador controlado
     private Vector2 moveInput;
+
+    // Input de IA para compañeros
+    private Vector2 aiMoveInput;
+
+    // Usa el input correcto según si es el jugador activo o un bot
+    private Vector2 EffectiveInput => (this == CurrentControlled) ? moveInput : aiMoveInput;
+
     private float freezeUntil = -1f;
     private bool glideActive = false;
     private float glideUntil = -1f;
 
-    // Jugador actualmente controlado (para indicador visual)
+    // === Control humano e identificación de equipo humano ===
     public static PlayerController CurrentControlled { get; private set; }
+    private static PlayerController _lastBallOwner;
+    private static TeamId _humanTeamId;
+    private static bool _humanTeamSet = false;
 
     void Awake()
     {
@@ -68,26 +80,67 @@ public class PlayerController : MonoBehaviour
         TeamRegistry.Register(this);
 
         if (aimArrow) aimArrow.gameObject.SetActive(false);
-        if (CurrentControlled == null) CurrentControlled = this;
+
+        // Primer jugador que se registre como controlado fija el equipo humano
+        if (CurrentControlled == null)
+        {
+            CurrentControlled = this;
+            if (!_humanTeamSet)
+            {
+                _humanTeamId = teamId;
+                _humanTeamSet = true;
+            }
+        }
     }
 
     void OnDestroy() => TeamRegistry.Unregister(this);
 
-    // Input de movimiento (WASD)
+    // Input de movimiento (WASD) del jugador humano
     public void SetMoveInput(Vector2 v)
     {
-        CurrentControlled = this;           // marcar como controlado aunque esté congelado
+        CurrentControlled = this; // este pasa a ser el controlado
+        if (!_humanTeamSet)
+        {
+            _humanTeamId = teamId;
+            _humanTeamSet = true;
+        }
+
         if (Time.time < freezeUntil) return;
         moveInput = v;
     }
 
+    // Input de IA (no cambia CurrentControlled)
+    public void SetAIMoveInput(Vector2 v)
+    {
+        aiMoveInput = v;
+    }
+
     void Update()
     {
-        // Flip lateral por escala (evita rotar sprite)
-        if (Mathf.Abs(moveInput.x) > 0.1f && Mathf.Abs(moveInput.x) >= Mathf.Abs(moveInput.y))
+        // 1) Auto-switch de control al receptor de tu equipo al cambiar posesión
+        var ball = BallController.Instance;
+        var owner = (ball != null) ? ball.Owner : null;
+
+        if (owner != _lastBallOwner)
+        {
+            _lastBallOwner = owner;
+
+            // Si la posesión la toma alguien de TU equipo, cambia el control
+            if (owner != null && _humanTeamSet && owner.teamId.Equals(_humanTeamId))
+            {
+                CurrentControlled = owner;
+            }
+
+            // Si se pierde la posesión o la toma el rival, no cambiamos el control
+            // (Puedes agregar lógica para auto-seleccionar al más cercano en defensa si lo deseas)
+        }
+
+        // 2) Flip lateral por escala usando EffectiveInput
+        var eff = EffectiveInput;
+        if (Mathf.Abs(eff.x) > 0.1f && Mathf.Abs(eff.x) >= Mathf.Abs(eff.y))
         {
             var scale = transform.localScale;
-            float targetX = Mathf.Sign(moveInput.x) * Mathf.Abs(scale.x);
+            float targetX = Mathf.Sign(eff.x) * Mathf.Abs(scale.x);
             if (!Mathf.Approximately(scale.x, targetX))
             {
                 scale.x = targetX;
@@ -95,7 +148,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // Disparo: click derecho para empezar/soltar
+        // 3) Disparo: click derecho para empezar/soltar
         var mouse = Mouse.current;
         if (mouse != null)
         {
@@ -103,8 +156,7 @@ public class PlayerController : MonoBehaviour
             if (mouse.rightButton.wasReleasedThisFrame) ConfirmAimShot();
         }
 
-        // Actualizar puntero de tiro
-        var ball = BallController.Instance;
+        // 4) Actualizar puntero de tiro
         if (isAiming && leftPost && rightPost && aimArrow)
         {
             float t = Mathf.PingPong((Time.time - aimStartTime) * aimOscillationHz, 1f);
@@ -126,7 +178,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // Indicador: jugador actualmente controlado
+        // 5) Indicador: jugador actualmente controlado
         if (hasBall)
         {
             bool isSelected = (CurrentControlled == this);
@@ -139,7 +191,7 @@ public class PlayerController : MonoBehaviour
     {
         if (MatchTimer.CountdownActive)
         {
-            rb.linearVelocity = Vector2.zero; // o tu forma de detener
+            rb.linearVelocity = Vector2.zero;
             return;
         }
 
@@ -161,14 +213,16 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
-        Vector2 target = moveInput * (speed * surfaceMultiplier);
+        Vector2 eff = EffectiveInput;
+        Vector2 target = eff * (speed * surfaceMultiplier);
+
         if (!slipEnabled)
         {
             rb.linearVelocity = target;
         }
         else
         {
-            bool hasInput = moveInput.sqrMagnitude > 0.0001f;
+            bool hasInput = eff.sqrMagnitude > 0.0001f;
             float rate = (hasInput ? slipAccel : slipDecel) * Time.fixedDeltaTime;
             rb.linearVelocity = Vector2.MoveTowards(rb.linearVelocity, target, rate);
         }
@@ -206,7 +260,9 @@ public class PlayerController : MonoBehaviour
             rb.linearVelocity = Vector2.zero;
         }
 
+        // Resetear input al terminar acción
         moveInput = Vector2.zero;
+        aiMoveInput = Vector2.zero;
     }
 
     // ===================== PASS / DROP =====================
@@ -241,6 +297,8 @@ public class PlayerController : MonoBehaviour
                                        : (Vector2)target.transform.position;
 
         ball.PassTo(to, intendedReceiver: target, passer: this);
+        // El switch de control ocurrirá cuando el BallController fije Owner en el receptor
+        // (lo detectamos en Update por cambio de _lastBallOwner).
     }
 
     public void ActionDrop()
@@ -249,6 +307,7 @@ public class PlayerController : MonoBehaviour
         if (!ball || ball.Owner != this) return;
         if (stopOnRelease) Halt();
         ball.Drop();
+        // No cambiamos control aquí; puedes añadir lógica si lo prefieres.
     }
 
     // ====================== SHOOT ======================

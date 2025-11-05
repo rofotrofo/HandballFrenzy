@@ -92,7 +92,7 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: f365b6cffc6e8de4eb826aea5bb26e43, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  playerSpeedMultiplier: 0.53
+  playerSpeedMultiplier: 0.4
   ballVelocityFactorPerSecond: 1
 --- !u!1 &7884481534119426950
 GameObject:

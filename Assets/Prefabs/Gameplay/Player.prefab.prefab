@@ -100,6 +100,7 @@ GameObject:
   - component: {fileID: 5339089021605346399}
   - component: {fileID: 8679649771915653213}
   - component: {fileID: -7090075101077639637}
+  - component: {fileID: 3679469540341422658}
   m_Layer: 6
   m_Name: Player.prefab
   m_TagString: Player
@@ -279,13 +280,40 @@ MonoBehaviour:
   postActionSlipGlideSeconds: 0.45
   postActionSlipStartFactor: 0.6
   postActionSlipExtraDecel: 8
-  opponentGoal: {fileID: 0}
   leftPost: {fileID: 0}
   rightPost: {fileID: 0}
   aimArrow: {fileID: 4787163267179050895}
   aimOscillationHz: 1.2
   autoCancelIfNoOwner: 1
   hasBall: {fileID: 2384855298133212447}
+--- !u!114 &3679469540341422658
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1908733233465332286}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 85bab340ac6ad1b488d63ffe7ccd679e, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  pc: {fileID: -7090075101077639637}
+  slotIndex: 1
+  attackSpots:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  defendSpots:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  neutralSpots:
+  - {fileID: 0}
+  - {fileID: 0}
+  - {fileID: 0}
+  arriveRadius: 0.15
+  slowRadius: 1.2
 --- !u!1 &2147103095550678657
 GameObject:
   m_ObjectHideFlags: 0
