@@ -314,6 +314,7 @@ MonoBehaviour:
   - {fileID: 0}
   arriveRadius: 0.15
   slowRadius: 1.2
+  playerClaimRadius: 20
 --- !u!1 &2147103095550678657
 GameObject:
   m_ObjectHideFlags: 0

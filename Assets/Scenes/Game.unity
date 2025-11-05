@@ -3148,7 +3148,7 @@ MonoBehaviour:
   spawnPoint: {fileID: 2030507453}
   keepRotation: 0
   players: []
-  startArena: 2
+  startArena: 0
 --- !u!4 &2030507453
 Transform:
   m_ObjectHideFlags: 0
@@ -3308,6 +3308,10 @@ PrefabInstance:
     - target: {fileID: 1908733233465332286, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
       propertyPath: m_Name
       value: Player.prefab
+      objectReference: {fileID: 0}
+    - target: {fileID: 3679469540341422658, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
+      propertyPath: playerClaimRadius
+      value: 20
       objectReference: {fileID: 0}
     - target: {fileID: 3679469540341422658, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
       propertyPath: 'attackSpots.Array.data[0]'
