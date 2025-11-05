@@ -8,6 +8,9 @@ public class MatchTimer : MonoBehaviour
 {
     public static MatchTimer Instance { get; private set; }
 
+    // 👉 Flag global para bloquear movimiento durante el countdown
+    public static bool CountdownActive { get; private set; } = false;
+
     [Header("Duraciones")]
     [Tooltip("Duración de CADA mitad en segundos (1:30 = 90)")]
     public float halfDurationSeconds = 90f;
@@ -89,9 +92,9 @@ public class MatchTimer : MonoBehaviour
     private IEnumerator StartFlowWithCountdown()
     {
         running = false;
-        SetHudVisible(false);            // Oculta HUD durante el countdown inicial
-        yield return CountdownCoroutine();
-        SetHudVisible(true);             // Muestra HUD al terminar
+        SetHudVisible(false);
+        yield return CountdownCoroutine(); // CountdownActive true durante el conteo
+        SetHudVisible(true);
         running = true;
     }
 
@@ -102,9 +105,9 @@ public class MatchTimer : MonoBehaviour
         UpdateHalfUI();
 
         running = false;
-        SetHudVisible(false);            // Oculta HUD durante el countdown de medio tiempo
+        SetHudVisible(false);
         yield return CountdownCoroutine();
-        SetHudVisible(true);             // Muestra HUD al reanudar
+        SetHudVisible(true);
         running = true;
     }
 
@@ -127,7 +130,7 @@ public class MatchTimer : MonoBehaviour
         var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
         while (!op.isDone) yield return null;
 
-        // 4) Countdown post-gol (con HUD oculto)
+        // 4) Countdown post-gol (bloquea movimiento)
         yield return CountdownCoroutine();
 
         // 5) Mostrar HUD y reanudar reloj
@@ -138,6 +141,8 @@ public class MatchTimer : MonoBehaviour
 
     private IEnumerator CountdownCoroutine()
     {
+        // Activar panel + bloquear movimiento globalmente
+        CountdownActive = true;
         if (countdownPanel) countdownPanel.SetActive(true);
 
         float t = countdownSeconds;
@@ -148,10 +153,13 @@ public class MatchTimer : MonoBehaviour
             t -= Time.deltaTime;
             yield return null;
         }
-        
+
+        // Pequeño colchón visual para el "1"
         yield return new WaitForSeconds(0.25f);
 
+        // Desactivar panel + liberar movimiento
         if (countdownPanel) countdownPanel.SetActive(false);
+        CountdownActive = false;
     }
 
     // ============== Helpers ==============
@@ -184,7 +192,7 @@ public class MatchTimer : MonoBehaviour
         if (clockText) clockText.gameObject.SetActive(visible);
         if (halfText)  halfText.gameObject.SetActive(visible);
     }
-    
+
     public static class SceneFlow
     {
         public const string MainMenu = "MainMenu";
@@ -192,14 +200,13 @@ public class MatchTimer : MonoBehaviour
 
         public static void LoadMenu()
         {
-            CleanupHUD();            // ⬅️ apaga o destruye HUD persistente
+            CleanupHUD();
             Time.timeScale = 1f;
             UnityEngine.SceneManagement.SceneManager.LoadScene(MainMenu, LoadSceneMode.Single);
         }
 
         public static void LoadGame()
         {
-            // Entra fresco; si quieres que el HUD aparezca solo en Game, puedes crearlo aquí
             Time.timeScale = 1f;
             UnityEngine.SceneManagement.SceneManager.LoadScene(Game, LoadSceneMode.Single);
         }
@@ -209,31 +216,16 @@ public class MatchTimer : MonoBehaviour
             var hud = HudPersist.Instance;
             if (hud != null)
             {
-                // Opción A: ocultarlo
                 hud.gameObject.SetActive(false);
-                // Opción B: destruirlo (si el Main Menu tiene su propia UI)
+                // O destrúyelo si tu menú tiene su propia UI:
                 // Object.Destroy(hud.gameObject);
             }
         }
     }
 
-
-    // Al recargar layout (escena), solo reenganchamos referencias si hiciera falta
     private void OnSceneLoaded(Scene s, LoadSceneMode m)
     {
-        // Si usas un Canvas nuevo por escena, aquí podrías volver a buscarlos:
-        // if (!clockText)
-        //     clockText = GameObject.FindWithTag("ClockText")?.GetComponent<TMP_Text>();
-        // if (!halfText)
-        //     halfText = GameObject.FindWithTag("HalfText")?.GetComponent<TMP_Text>();
-        // if (!countdownPanel)
-        //     countdownPanel = GameObject.Find("CountdownPanel");
-        // if (!countdownText && countdownPanel)
-        //     countdownText = countdownPanel.GetComponentInChildren<TMP_Text>(true);
-        // if (!goalUIManager)
-        //     goalUIManager = FindFirstObjectByType<GoalUIManager>();
-
-        // Refresca textos con el estado vigente (no cambia visibilidades aquí para evitar parpadeos)
+        // Si usas un Canvas nuevo por escena, vuelve a enganchar referencias aquí (opcional).
         UpdateHalfUI();
         UpdateClockUI();
     }

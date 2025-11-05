@@ -137,6 +137,12 @@ public class PlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
+        if (MatchTimer.CountdownActive)
+        {
+            rb.linearVelocity = Vector2.zero; // o tu forma de detener
+            return;
+        }
+
         if (!rb || !rb.simulated) return;
 
         bool inFreeze = Time.time < freezeUntil;
