@@ -7,7 +7,7 @@ public class TeammateAI : MonoBehaviour
 {
     public PlayerController pc;
 
-    [Header("Slot en la formación (0=defensa, 1=medio, 2=ataque)")]
+    [Header("Slot en la formación (0=defensa,1=medio,2=ataque)")]
     [Range(0,2)] public int slotIndex = 1;
 
     [Header("Zonas locales (opcional si usas TeamZones)")]
@@ -22,11 +22,28 @@ public class TeammateAI : MonoBehaviour
     [Header("Coordinación de spots")]
     [Tooltip("Si el jugador humano entra en este radio de un spot, ese spot queda reservado para él.")]
     public float playerClaimRadius = 0.8f;
+    [Tooltip("Radio para considerar que un spot está 'ocupado' por cercanía.")]
+    public float occupancyRadius = 0.45f;
+    [Tooltip("Ventaja mínima de distancia (m) para permitir que otro te quite el spot.")]
+    public float stickinessGain = 0.15f;
+    [Tooltip("Tiempo mínimo antes de permitir re-asignación de spot (s).")]
+    public float reassignmentCooldown = 0.35f;
 
-    // índice actual que este bot cree tener asignado en el banco actual (-1 si ninguno)
+    [Header("Separación entre compañeros")]
+    public float separationRadius = 0.9f;
+    public float separationWeight = 0.6f; // 0 = sin separación
+
+    [Header("Retardo para ir a neutro")]
+    [Tooltip("Tiempo que permanecemos en modo ATAQUE tras quedar sin dueño el balón, antes de pasar a NEUTRO.")]
+    public float neutralDelayAfterNoOwner = 2f;
+
+    // ===== Memoria compartida de posesión (para los 3 jugadores) =====
+    private static TeamId? s_prevOwnerTeam = null;  // último equipo que tuvo la pelota (null si nunca)
+    private static float   s_noOwnerSince  = -1f;   // Time.time cuando quedó sin dueño (-1 si hay dueño)
+
+    // Estado interno por bot
     private int _currentAssignedIndex = -1;
-
-    // Espera 1 frame para que CurrentControlled se establezca
+    private float _lastAssignTime = -999f;
     private bool _waitedOneFrame = false;
 
     void Awake()
@@ -37,75 +54,159 @@ public class TeammateAI : MonoBehaviour
     void LateUpdate()
     {
         if (!_waitedOneFrame) { _waitedOneFrame = true; return; }
-
         if (MatchTimer.CountdownActive) { pc.SetAIMoveInput(Vector2.zero); return; }
 
-        // Si este jugador es el controlado por humano, no usamos IA
+        // Humano -> IA off
         if (pc == PlayerController.CurrentControlled) { pc.SetAIMoveInput(Vector2.zero); _currentAssignedIndex = -1; return; }
 
-        var ball = BallController.Instance;
+        // ====== Lectura y memoria de posesión ======
+        var ball  = BallController.Instance;
+        var owner = (ball != null) ? ball.Owner : null;
 
-        bool haveOwner = ball && ball.Owner != null;
-        bool ourBall = haveOwner && (ball.Owner.teamId == pc.teamId);
+        if (owner != null)
+        {
+            // Hay dueño: resetea "sin dueño" y guarda equipo
+            s_noOwnerSince = -1f;
+            s_prevOwnerTeam = owner.teamId;
+        }
+        else
+        {
+            // Sin dueño: inicia o continúa el temporizador
+            if (s_noOwnerSince < 0f) s_noOwnerSince = Time.time;
+        }
 
-        // Seleccionar banco de spots según estado
-        Transform[] bank = GetBank(ourBall, haveOwner);
+        bool haveOwner = owner != null;
+
+        // ourBall “efectivo” con retardo: si NO hay dueño pero aún no pasa el delay,
+        // nos quedamos en ataque si el último dueño fue nuestro equipo.
+        bool ourBallEffective = false;
+        if (haveOwner)
+        {
+            ourBallEffective = (owner.teamId == pc.teamId);
+        }
+        else
+        {
+            bool weWereLast = (s_prevOwnerTeam.HasValue && s_prevOwnerTeam.Value.Equals(pc.teamId));
+            bool delayActive = (s_noOwnerSince >= 0f) && ((Time.time - s_noOwnerSince) < neutralDelayAfterNoOwner);
+            ourBallEffective = weWereLast && delayActive; // mantenemos ATAQUE durante el grace period
+        }
+
+        // ====== Selección de banco según estado EFECTIVO ======
+        Transform[] bank = GetBank(ourBallEffective, haveOwner);
         if (bank == null || bank.Length == 0)
         {
-            // Fallback sin zonas: ir a un objetivo dinámico
-            Vector2 dyn = DynamicFallback(ourBall, haveOwner, slotIndex);
-            MoveTowards(dyn);
+            Vector2 dyn = DynamicFallback(ourBallEffective, haveOwner, slotIndex);
+            MoveTowardsWithSeparation(dyn);
             _currentAssignedIndex = -1;
             return;
         }
 
-        // Determinar si el jugador humano reserva un spot
+        // 1) Reserva del humano
         int reservedForPlayer = -1;
         var human = PlayerController.CurrentControlled;
         if (human != null && human.teamId == pc.teamId)
-        {
             reservedForPlayer = ClosestSpotIndex(bank, human.transform.position, playerClaimRadius);
-        }
 
-        // Conjunto de ocupados por otros bots de mi equipo (únicamente IA activas)
+        // 2) Ocupados por mi equipo (IA activas) + humano
         var occupied = GetOccupiedSpotIndicesByMyTeam(bank, exclude: this);
-
-        // Si el humano reserva uno, añádelo como ocupado
         if (reservedForPlayer >= 0) occupied.Add(reservedForPlayer);
 
-        // Si yo estaba ocupando uno que ahora queda reservado por humano, suéltalo
-        if (_currentAssignedIndex == reservedForPlayer) _currentAssignedIndex = -1;
+        // 3) Elegir spot (con stickiness, closest-wins, etc.)
+        int chosen = ChooseSpot(bank, occupied, reservedForPlayer);
 
-        // Elegir asignación: preferir slotIndex, luego el libre más cercano
-        int desired = slotIndex;
-        int assigned = -1;
-
-        if (!IsIndexFree(desired, occupied, bank.Length) || desired == reservedForPlayer)
+        if (chosen != _currentAssignedIndex)
         {
-            assigned = PickNearestFreeIndex(bank, occupied, transform.position);
-        }
-        else
-        {
-            assigned = desired;
+            _currentAssignedIndex = chosen;
+            _lastAssignTime = Time.time;
         }
 
-        // Marca como ocupado (localmente); si otro bot eligió igual en este frame,
-        // el siguiente frame se resuelve (con 2 bots funciona estable).
-        _currentAssignedIndex = assigned;
+        Vector2 targetPos = (chosen >= 0) ? (Vector2)bank[chosen].position
+                                          : DynamicFallback(ourBallEffective, haveOwner, slotIndex);
 
-        // Mover hacia el spot asignado, o fallback si no hay
-        Vector2 targetPos = (assigned >= 0) ? (Vector2)bank[assigned].position
-                                            : DynamicFallback(ourBall, haveOwner, slotIndex);
-
-        MoveTowards(targetPos);
+        MoveTowardsWithSeparation(targetPos);
     }
 
-    // -------------------- Helpers de asignación --------------------
+    // -------------------- Asignación de spot --------------------
+
+    int ChooseSpot(Transform[] bank, HashSet<int> occupied, int reservedForPlayer)
+    {
+        int n = bank.Length;
+
+        bool Free(int idx) => idx >= 0 && idx < n && !occupied.Contains(idx) && bank[idx] != null;
+
+        bool IAmClosest(int idx)
+        {
+            if (idx < 0 || idx >= n || bank[idx] == null) return false;
+
+            float myD = (bank[idx].position - transform.position).sqrMagnitude;
+
+            var human = PlayerController.CurrentControlled;
+            if (human && human.teamId == pc.teamId)
+            {
+                float hd = (bank[idx].position - human.transform.position).sqrMagnitude;
+                if (hd <= myD - (stickinessGain * stickinessGain)) return false;
+            }
+
+            foreach (var other in FindObjectsOfType<PlayerController>())
+            {
+                if (other == null || other.teamId != pc.teamId || other == pc) continue;
+
+                var ai = other.GetComponent<TeammateAI>();
+                if (!ai) continue;
+                if (other == PlayerController.CurrentControlled) continue;
+
+                bool aiOurBall, aiHaveOwner;
+                GetStateFor(ai, out aiOurBall, out aiHaveOwner);
+                var aiBank = ai.GetBank(aiOurBall, aiHaveOwner);
+                if (aiBank != bank) continue;
+
+                float od = (bank[idx].position - other.transform.position).sqrMagnitude;
+                if (od <= myD - (stickinessGain * stickinessGain)) return false;
+            }
+            return true;
+        }
+
+        bool CooldownActive() => (Time.time - _lastAssignTime) < reassignmentCooldown;
+
+        if (_currentAssignedIndex >= 0 && _currentAssignedIndex < n && bank[_currentAssignedIndex] != null)
+        {
+            bool reservedHit = (_currentAssignedIndex == reservedForPlayer);
+            bool stillFree = Free(_currentAssignedIndex);
+            bool closest = IAmClosest(_currentAssignedIndex);
+
+            if (!reservedHit && stillFree && (closest || CooldownActive()))
+                return _currentAssignedIndex;
+        }
+
+        if (Free(slotIndex) && slotIndex != reservedForPlayer && IAmClosest(slotIndex))
+            return slotIndex;
+
+        int best = -1; float bestD2 = float.PositiveInfinity;
+        for (int i = 0; i < n; i++)
+        {
+            if (!Free(i) || i == reservedForPlayer) continue;
+            if (!IAmClosest(i)) continue;
+
+            float d2 = (bank[i].position - transform.position).sqrMagnitude;
+            if (d2 < bestD2) { bestD2 = d2; best = i; }
+        }
+        if (best >= 0) return best;
+
+        best = -1; bestD2 = float.PositiveInfinity;
+        for (int i = 0; i < n; i++)
+        {
+            if (!Free(i) || i == reservedForPlayer) continue;
+            float d2 = (bank[i].position - transform.position).sqrMagnitude;
+            if (d2 < bestD2) { bestD2 = d2; best = i; }
+        }
+        return best;
+    }
+
+    // -------------------- Helpers de ocupación/estado --------------------
 
     Transform[] GetBank(bool ourBall, bool haveOwner)
     {
         Transform[] localBank = null;
-
         if (ourBall) localBank = attackSpots;
         else if (haveOwner) localBank = defendSpots;
         else localBank = neutralSpots;
@@ -124,16 +225,12 @@ public class TeammateAI : MonoBehaviour
     int ClosestSpotIndex(Transform[] bank, Vector3 pos, float maxRadius)
     {
         int bestIdx = -1;
-        float bestDist = maxRadius * maxRadius;
+        float bestD2 = maxRadius * maxRadius;
         for (int i = 0; i < bank.Length; i++)
         {
             if (bank[i] == null) continue;
             float d2 = (bank[i].position - pos).sqrMagnitude;
-            if (d2 <= bestDist)
-            {
-                bestDist = d2;
-                bestIdx = i;
-            }
+            if (d2 <= bestD2) { bestD2 = d2; bestIdx = i; }
         }
         return bestIdx;
     }
@@ -141,30 +238,31 @@ public class TeammateAI : MonoBehaviour
     HashSet<int> GetOccupiedSpotIndicesByMyTeam(Transform[] bank, TeammateAI exclude)
     {
         var set = new HashSet<int>();
-        // Intenta usar TeamRegistry si lo tienes; de lo contrario, busca en escena
         var allPlayers = Object.FindObjectsOfType<PlayerController>();
         foreach (var p in allPlayers)
         {
             if (p == null || p.teamId != pc.teamId) continue;
-            if (p == PlayerController.CurrentControlled) continue; // humano no como bot
+
+            if (p == PlayerController.CurrentControlled)
+            {
+                int pi = ClosestSpotIndex(bank, p.transform.position, occupancyRadius);
+                if (pi >= 0) set.Add(pi);
+                continue;
+            }
 
             var ai = p.GetComponent<TeammateAI>();
             if (!ai || ai == exclude) continue;
 
-            // Solo considerar si ese AI está usando este mismo banco (mismo estado)
             bool aiOurBall, aiHaveOwner;
             GetStateFor(ai, out aiOurBall, out aiHaveOwner);
             var aiBank = ai.GetBank(aiOurBall, aiHaveOwner);
-            if (aiBank != bank) continue; // bancos distintos (otro estado), no chocan
+            if (aiBank != bank) continue;
 
-            int idx = ai._currentAssignedIndex;
-            if (idx >= 0 && idx < bank.Length) set.Add(idx);
-            else
-            {
-                // Si no tiene asignación aún, infiere por cercanía al spot más próximo (suaviza primeros frames)
-                int guess = ClosestSpotIndex(bank, ai.transform.position, Mathf.Infinity);
-                if (guess >= 0) set.Add(guess);
-            }
+            int idx = ClosestSpotIndex(bank, ai.transform.position, occupancyRadius);
+            if (idx >= 0) set.Add(idx);
+
+            if (ai._currentAssignedIndex >= 0 && ai._currentAssignedIndex < bank.Length)
+                set.Add(ai._currentAssignedIndex);
         }
         return set;
     }
@@ -173,49 +271,60 @@ public class TeammateAI : MonoBehaviour
     {
         var ball = BallController.Instance;
         haveOwner = ball && ball.Owner != null;
-        ourBall = haveOwner && (ball.Owner.teamId == other.pc.teamId);
-    }
-
-    bool IsIndexFree(int idx, HashSet<int> occupied, int bankLen)
-    {
-        return idx >= 0 && idx < bankLen && !occupied.Contains(idx);
-    }
-
-    int PickNearestFreeIndex(Transform[] bank, HashSet<int> occupied, Vector3 fromPos)
-    {
-        int bestIdx = -1;
-        float bestD2 = float.PositiveInfinity;
-
-        for (int i = 0; i < bank.Length; i++)
+        if (haveOwner) ourBall = (ball.Owner.teamId == other.pc.teamId);
+        else
         {
-            if (bank[i] == null) continue;
-            if (occupied.Contains(i)) continue;
-
-            float d2 = (bank[i].position - fromPos).sqrMagnitude;
-            if (d2 < bestD2)
-            {
-                bestD2 = d2;
-                bestIdx = i;
-            }
+            // Misma lógica de grace period para los otros (consistente)
+            bool weWereLast = s_prevOwnerTeam.HasValue && s_prevOwnerTeam.Value.Equals(other.pc.teamId);
+            bool delayActive = (s_noOwnerSince >= 0f) && ((Time.time - s_noOwnerSince) < other.neutralDelayAfterNoOwner);
+            ourBall = weWereLast && delayActive;
         }
-        return bestIdx;
     }
 
-    // -------------------- Movimiento --------------------
+    // -------------------- Movimiento + separación --------------------
 
-    void MoveTowards(Vector2 targetPos)
+    void MoveTowardsWithSeparation(Vector2 targetPos)
     {
         Vector2 to = targetPos - (Vector2)transform.position;
         float dist = to.magnitude;
 
-        if (dist <= arriveRadius) { pc.SetAIMoveInput(Vector2.zero); return; }
+        Vector2 dir = Vector2.zero;
+        if (dist > arriveRadius)
+        {
+            dir = to / Mathf.Max(dist, 0.0001f);
+            float factor = (dist < slowRadius) ? Mathf.InverseLerp(arriveRadius, slowRadius, dist) : 1f;
+            dir *= Mathf.Clamp01(factor);
+        }
 
-        Vector2 desiredDir = to / Mathf.Max(dist, 0.0001f);
+        if (separationWeight > 0f && separationRadius > 0f)
+        {
+            Vector2 sep = ComputeSeparation();
+            if (sep.sqrMagnitude > 0.000001f)
+            {
+                Vector2 combined = dir + sep * separationWeight;
+                if (combined.sqrMagnitude > 0.000001f) dir = combined.normalized;
+            }
+        }
 
-        float factor = (dist < slowRadius) ? Mathf.InverseLerp(arriveRadius, slowRadius, dist) : 1f;
-        desiredDir *= Mathf.Clamp01(factor);
+        pc.SetAIMoveInput(dir);
+    }
 
-        pc.SetAIMoveInput(desiredDir);
+    Vector2 ComputeSeparation()
+    {
+        Vector2 acc = Vector2.zero;
+        var all = Object.FindObjectsOfType<PlayerController>();
+        foreach (var other in all)
+        {
+            if (other == null || other.teamId != pc.teamId || other == pc) continue;
+
+            Vector2 delta = (Vector2)transform.position - (Vector2)other.transform.position;
+            float d = delta.magnitude;
+            if (d <= 0.0001f || d > separationRadius) continue;
+
+            float t = 1f - (d / separationRadius);
+            acc += (delta / d) * t;
+        }
+        return acc;
     }
 
     // -------------------- Fallback dinámico --------------------
