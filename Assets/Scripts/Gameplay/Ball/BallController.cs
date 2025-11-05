@@ -103,7 +103,7 @@ public class BallController : MonoBehaviour
     private readonly List<Collider2D> _temporarilyIgnored = new();
     private float _passGhostEndsAt = -1f;
     private PlayerController _intendedReceiver = null;
-
+    
     void Awake()
     {
         if (Instance != null && Instance != this) Destroy(gameObject);
@@ -144,7 +144,7 @@ public class BallController : MonoBehaviour
 
         _ = IsStoneActive();
     }
-
+    
     void OnTriggerEnter2D(Collider2D other)
     {
         // PICKUP NORMAL

@@ -1,7 +1,8 @@
 using UnityEngine;
-using UnityEngine.InputSystem; // <- usamos Mouse.current
+using UnityEngine.InputSystem;
 
 [RequireComponent(typeof(Rigidbody2D))]
+[DisallowMultipleComponent]
 public class PlayerController : MonoBehaviour
 {
     [Header("Movement")]
@@ -20,8 +21,9 @@ public class PlayerController : MonoBehaviour
     public float slipDecel = 3f;
 
     [Header("Directional Pass")]
-    [Range(0f, 1f)] public float directionalInputThreshold = 0.2f;
-    [Range(1f, 45f)] public float directionalMaxAngleDeg = 20f;
+    [Tooltip("Apertura del cono direccional para encontrar compañero (grados).")]
+    [Range(1f, 60f)] public float directionalMaxAngleDeg = 20f;
+    [Tooltip("Componente mínima hacia adelante (0-1) para considerar a un compañero en el cono.")]
     [Min(0f)] public float directionalMinForward = 0.05f;
 
     [Header("Post Action")]
@@ -31,14 +33,7 @@ public class PlayerController : MonoBehaviour
     [Range(0f, 1f)] public float postActionSlipStartFactor = 0.6f;
     public float postActionSlipExtraDecel = 8f;
 
-    [Header("Targets (optional, legacy)")]
-    public Transform opponentGoal; // solo lo dejamos por compatibilidad (ActionShoot)
-
-    [Header("Visual Facing (solo flip horizontal)")]
-    public Transform visualRoot;
-    [Range(0f, 1f)] public float horizontalFaceThreshold = 0.2f;
-
-    // ======== NUEVO: TIRO CON PUNTERÍA ENTRE POSTES (SIN PlayerInput EVENTS) ========
+    // ---- TIRO CON PUNTERÍA ENTRE POSTES ----
     [Header("Shoot Aiming (posts)")]
     public Transform leftPost;
     public Transform rightPost;
@@ -51,7 +46,9 @@ public class PlayerController : MonoBehaviour
 
     private bool isAiming = false;
     private float aimStartTime = 0f;
-    // ===============================================================================
+
+    [Header("Selection Indicator")]
+    public GameObject hasBall;
 
     private Rigidbody2D rb;
     private Vector2 moveInput;
@@ -59,67 +56,82 @@ public class PlayerController : MonoBehaviour
     private bool glideActive = false;
     private float glideUntil = -1f;
 
+    // Jugador actualmente controlado (para indicador visual)
+    public static PlayerController CurrentControlled { get; private set; }
+
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
         rb.gravityScale = 0f;
         rb.interpolation = RigidbodyInterpolation2D.Interpolate;
+
         TeamRegistry.Register(this);
 
-        if (aimArrow) aimArrow.gameObject.SetActive(false); // puntero oculto al inicio
+        if (aimArrow) aimArrow.gameObject.SetActive(false);
+        if (CurrentControlled == null) CurrentControlled = this;
     }
 
     void OnDestroy() => TeamRegistry.Unregister(this);
 
+    // Input de movimiento (WASD)
     public void SetMoveInput(Vector2 v)
     {
+        CurrentControlled = this;           // marcar como controlado aunque esté congelado
         if (Time.time < freezeUntil) return;
         moveInput = v;
     }
 
     void Update()
     {
-        // ---- Flip 0°/180° según input horizontal (tu comportamiento actual) ----
-        if (Mathf.Abs(moveInput.x) >= horizontalFaceThreshold && Mathf.Abs(moveInput.x) >= Mathf.Abs(moveInput.y))
+        // Flip lateral por escala (evita rotar sprite)
+        if (Mathf.Abs(moveInput.x) > 0.1f && Mathf.Abs(moveInput.x) >= Mathf.Abs(moveInput.y))
         {
-            var t = visualRoot ? visualRoot : transform;
-            var e = t.eulerAngles;
-            float z = (moveInput.x > 0f) ? 0f : 180f;
-            t.rotation = Quaternion.Euler(e.x, e.y, z);
+            var scale = transform.localScale;
+            float targetX = Mathf.Sign(moveInput.x) * Mathf.Abs(scale.x);
+            if (!Mathf.Approximately(scale.x, targetX))
+            {
+                scale.x = targetX;
+                transform.localScale = scale;
+            }
         }
 
-        // ---- INPUT DEL MOUSE para TIRO (sin PlayerInput events) ----
+        // Disparo: click derecho para empezar/soltar
         var mouse = Mouse.current;
         if (mouse != null)
         {
-            if (mouse.rightButton.wasPressedThisFrame)
-                BeginAimShot();      // presionaste: empezar a apuntar
-            if (mouse.rightButton.wasReleasedThisFrame)
-                ConfirmAimShot();    // soltaste: disparar
+            if (mouse.rightButton.wasPressedThisFrame) BeginAimShot();
+            if (mouse.rightButton.wasReleasedThisFrame) ConfirmAimShot();
         }
 
-        // ---- Actualizar puntero si estamos apuntando ----
+        // Actualizar puntero de tiro
+        var ball = BallController.Instance;
         if (isAiming && leftPost && rightPost && aimArrow)
         {
             float t = Mathf.PingPong((Time.time - aimStartTime) * aimOscillationHz, 1f);
             Vector3 pos = Vector3.Lerp(leftPost.position, rightPost.position, t);
-            aimArrow.position = pos;
+            if ((aimArrow.position - pos).sqrMagnitude > 0.000001f)
+                aimArrow.position = pos;
 
-            // orientar flecha hacia la pelota (se ve más claro)
-            var ball = BallController.Instance;
             if (ball)
             {
                 Vector2 dir = (Vector2)pos - (Vector2)ball.transform.position;
                 if (dir.sqrMagnitude > 0.0001f)
                 {
                     float ang = Mathf.Atan2(dir.y, dir.x) * Mathf.Rad2Deg - 90f;
-                    aimArrow.rotation = Quaternion.Euler(0, 0, ang);
+                    aimArrow.rotation = Quaternion.Euler(0f, 0f, ang);
                 }
 
-                // cancelar si ya no soy el dueño mientras apunto
                 if (autoCancelIfNoOwner && ball.Owner != this)
                     CancelAimShot();
             }
+        }
+
+        // Indicador: jugador actualmente controlado
+        if (hasBall)
+        {
+            bool isSelected = (CurrentControlled == this);
+            if (hasBall.activeSelf != isSelected)
+                hasBall.SetActive(isSelected);
         }
     }
 
@@ -176,17 +188,22 @@ public class PlayerController : MonoBehaviour
                 glideActive = true;
                 glideUntil = Time.time + postActionSlipGlideSeconds;
             }
-            else { glideActive = false; rb.linearVelocity = Vector2.zero; }
+            else
+            {
+                glideActive = false;
+                rb.linearVelocity = Vector2.zero;
+            }
         }
         else
         {
             glideActive = false;
             rb.linearVelocity = Vector2.zero;
         }
+
         moveInput = Vector2.zero;
     }
 
-    // ===================== PASSE / DROP (sin cambios) =====================
+    // ===================== PASS / DROP =====================
 
     public void ActionPass()
     {
@@ -196,25 +213,28 @@ public class PlayerController : MonoBehaviour
         if (stopOnRelease) Halt();
 
         PlayerController target = null;
-        Vector2 raw = moveInput;
+        bool hasDirectionalInput = moveInput.sqrMagnitude > 0.0001f;
 
-        if (raw.sqrMagnitude >= directionalInputThreshold * directionalInputThreshold)
+        if (hasDirectionalInput)
         {
-            Vector2 dir = Mathf.Abs(raw.x) >= Mathf.Abs(raw.y)
-                ? new Vector2(Mathf.Sign(raw.x), 0f)
-                : new Vector2(0f, Mathf.Sign(raw.y));
-
+            Vector2 dir = moveInput.normalized;
             target = TeamRegistry.GetClosestTeammateInCardinal(
                 this, dir, directionalMaxAngleDeg, directionalMinForward);
         }
 
-        if (!target) target = TeamRegistry.GetClosestTeammate(this);
-        if (!target) { BallController.Instance.Pass(transform.up, passer: this); return; }
+        if (!target)
+            target = TeamRegistry.GetClosestTeammate(this);
+
+        if (!target)
+        {
+            ball.Pass(transform.up, passer: this);
+            return;
+        }
 
         Vector2 to = target.ballAnchor ? (Vector2)target.ballAnchor.position
                                        : (Vector2)target.transform.position;
 
-        BallController.Instance.PassTo(to, intendedReceiver: target, passer: this);
+        ball.PassTo(to, intendedReceiver: target, passer: this);
     }
 
     public void ActionDrop()
@@ -225,15 +245,10 @@ public class PlayerController : MonoBehaviour
         ball.Drop();
     }
 
-    // ====================== TIRO ======================
+    // ====================== SHOOT ======================
 
-    /// Legacy: tiro directo (por compatibilidad si algo lo llama)
-    public void ActionShoot()
-    {
-        BeginAimShot();
-    }
+    public void ActionShoot() => BeginAimShot();
 
-    // ---- Nuevo esquema: control interno con Mouse ----
     private void BeginAimShot()
     {
         var ball = BallController.Instance;
@@ -257,13 +272,12 @@ public class PlayerController : MonoBehaviour
 
         if (stopOnRelease) Halt();
         ball.Shoot(dir, 1f);
-
         CancelAimShot();
     }
 
     private void CancelAimShot()
     {
         isAiming = false;
-        if (aimArrow) aimArrow.gameObject.SetActive(false);
+        if (aimArrow && aimArrow.gameObject.activeSelf) aimArrow.gameObject.SetActive(false);
     }
 }
