@@ -130,9 +130,6 @@ public class PlayerController : MonoBehaviour
             {
                 CurrentControlled = owner;
             }
-
-            // Si se pierde la posesión o la toma el rival, no cambiamos el control
-            // (Puedes agregar lógica para auto-seleccionar al más cercano en defensa si lo deseas)
         }
 
         // 2) Flip lateral por escala usando EffectiveInput
@@ -148,7 +145,7 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // 3) Disparo: click derecho para empezar/soltar
+        // 3) Disparo humano: click derecho para empezar/soltar
         var mouse = Mouse.current;
         if (mouse != null)
         {
@@ -265,7 +262,7 @@ public class PlayerController : MonoBehaviour
         aiMoveInput = Vector2.zero;
     }
 
-    // ===================== PASS / DROP =====================
+    // ===================== PASS / DROP (HUMANO) =====================
 
     public void ActionPass()
     {
@@ -297,8 +294,6 @@ public class PlayerController : MonoBehaviour
                                        : (Vector2)target.transform.position;
 
         ball.PassTo(to, intendedReceiver: target, passer: this);
-        // El switch de control ocurrirá cuando el BallController fije Owner en el receptor
-        // (lo detectamos en Update por cambio de _lastBallOwner).
     }
 
     public void ActionDrop()
@@ -307,10 +302,9 @@ public class PlayerController : MonoBehaviour
         if (!ball || ball.Owner != this) return;
         if (stopOnRelease) Halt();
         ball.Drop();
-        // No cambiamos control aquí; puedes añadir lógica si lo prefieres.
     }
 
-    // ====================== SHOOT ======================
+    // ====================== SHOOT HUMANO ======================
 
     public void ActionShoot() => BeginAimShot();
 
@@ -344,5 +338,65 @@ public class PlayerController : MonoBehaviour
     {
         isAiming = false;
         if (aimArrow && aimArrow.gameObject.activeSelf) aimArrow.gameObject.SetActive(false);
+    }
+
+    // ====================== MÉTODOS PARA IA ======================
+
+    /// <summary>
+    /// Pase para IA. Si preferredDir tiene magnitud, prioriza un compañero dentro del cono en esa dirección;
+    /// si no, pasa al compañero más cercano. Si no encuentra receptor, suelta en esa dirección.
+    /// </summary>
+    public void AIPass(Vector2 preferredDir, float coneAngleDeg = 25f, float minForward = 0.0f)
+    {
+        var ball = BallController.Instance;
+        if (!ball || ball.Owner != this) return;
+
+        if (stopOnRelease) Halt();
+
+        PlayerController target = null;
+
+        if (preferredDir.sqrMagnitude > 0.0001f)
+        {
+            target = TeamRegistry.GetClosestTeammateInCardinal(
+                this, preferredDir.normalized, coneAngleDeg, minForward);
+        }
+
+        if (!target)
+            target = TeamRegistry.GetClosestTeammate(this);
+
+        if (!target)
+        {
+            Vector2 dir = (preferredDir.sqrMagnitude > 0.0001f) ? preferredDir.normalized : transform.right;
+            ball.Pass(dir, passer: this);
+            return;
+        }
+
+        Vector2 to = target.ballAnchor ? (Vector2)target.ballAnchor.position
+                                       : (Vector2)target.transform.position;
+
+        ball.PassTo(to, intendedReceiver: target, passer: this);
+    }
+
+    /// <summary>
+    /// Tiro de IA entre postes. Elige un punto entre leftPost/rightPost con pequeño spread.
+    /// </summary>
+    public void AIShootAtGoal(float spread = 0.12f, float power = 1f)
+    {
+        var ball = BallController.Instance;
+        if (!ball || ball.Owner != this) return;
+        if (!leftPost || !rightPost)
+        {
+            // Sin postes, mejor no arriesgar: suelta hacia adelante
+            AIPass(transform.right, 20f, 0f);
+            return;
+        }
+
+        // Punto objetivo en la portería
+        float t = Mathf.Clamp01(0.5f + Random.Range(-spread, spread));
+        Vector2 aimPoint = Vector2.Lerp(leftPost.position, rightPost.position, t);
+        Vector2 dir = (aimPoint - (Vector2)ball.transform.position).normalized;
+
+        if (stopOnRelease) Halt();
+        ball.Shoot(dir, power);
     }
 }
