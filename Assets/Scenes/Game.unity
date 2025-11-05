@@ -210,6 +210,42 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 187513913}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1567139376}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 651356031}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 1190204765}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 291055647}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1435200553}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 599693370}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1091608800}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1498491909}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -1884,6 +1920,46 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: separationRadius
+      value: 0.9
+      objectReference: {fileID: 0}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 187513913}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1567139376}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 651356031}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 1190204765}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 291055647}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1435200553}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 599693370}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1091608800}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1498491909}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -1977,6 +2053,42 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 187513913}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1567139376}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'attackSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 651356031}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 1190204765}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 291055647}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'defendSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1435200553}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[0]'
+      value: 
+      objectReference: {fileID: 599693370}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[1]'
+      value: 
+      objectReference: {fileID: 1091608800}
+    - target: {fileID: 7238905777271193675, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: 'neutralSpots.Array.data[2]'
+      value: 
+      objectReference: {fileID: 1498491909}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
     m_AddedGameObjects: []
@@ -3310,8 +3422,8 @@ PrefabInstance:
       value: Player.prefab
       objectReference: {fileID: 0}
     - target: {fileID: 3679469540341422658, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
-      propertyPath: playerClaimRadius
-      value: 20
+      propertyPath: separationRadius
+      value: 0.9
       objectReference: {fileID: 0}
     - target: {fileID: 3679469540341422658, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
       propertyPath: 'attackSpots.Array.data[0]'

@@ -5,6 +5,48 @@ using System.Linq;
 [DisallowMultipleComponent]
 public class TeammateAI : MonoBehaviour
 {
+    // ====== LOCK LIGERO DE SPOTS (por equipo + banco) ======
+    // Un "claim" por frame para cada indice de spot, evita que 2 IAs del mismo equipo elijan el mismo.
+    static class SpotLock
+    {
+        // Clave: (teamId, bankType, spotIndex)
+        struct Key
+        {
+            public TeamId team;
+            public int bankType; // 0=Attack,1=Defend,2=Neutral
+            public int index;
+            public Key(TeamId t, int b, int i){ team=t; bankType=b; index=i; }
+        }
+
+        static Dictionary<Key,int> _owners = new Dictionary<Key,int>(128);
+
+        // Debe llamarse una vez por frame antes de que los bots reclamen spots (lo hacemos implícito con frameId)
+        static int _frameId = -1;
+        static void BeginFrame()
+        {
+            int f = Time.frameCount;
+            if (f != _frameId)
+            {
+                _owners.Clear();
+                _frameId = f;
+            }
+        }
+
+        public static bool TryClaim(TeamId team, int bankType, int index, int instanceId)
+        {
+            BeginFrame();
+            var k = new Key(team, bankType, index);
+            if (_owners.TryGetValue(k, out var owner))
+            {
+                return owner == instanceId; // ya lo tenía este mismo
+            }
+            _owners[k] = instanceId;
+            return true;
+        }
+    }
+
+    // ----------------------------------------
+
     public PlayerController pc;
 
     [Header("Slot en la formación (0=defensa,1=medio,2=ataque)")]
@@ -17,7 +59,9 @@ public class TeammateAI : MonoBehaviour
 
     [Header("Movimiento")]
     public float arriveRadius = 0.15f;
-    public float slowRadius = 1.2f;
+    public float slowRadius   = 1.2f;
+    [Tooltip("Radio de órbita para micro-desencimado visual al llegar al spot.")]
+    public float orbitRadius  = 0.18f;
 
     [Header("Coordinación de spots")]
     [Tooltip("Si el jugador humano entra en este radio de un spot, ese spot queda reservado para él.")]
@@ -46,9 +90,14 @@ public class TeammateAI : MonoBehaviour
     private float _lastAssignTime = -999f;
     private bool _waitedOneFrame = false;
 
+    // Cache para micro-orbita determinista
+    private float _orbitAngle;
+
     void Awake()
     {
         if (!pc) pc = GetComponent<PlayerController>();
+        // Ángulo determinista por agente (no cambia en runtime)
+        _orbitAngle = (Mathf.Abs(GetInstanceID() % 360)) * Mathf.Deg2Rad;
     }
 
     void LateUpdate()
@@ -65,34 +114,28 @@ public class TeammateAI : MonoBehaviour
 
         if (owner != null)
         {
-            // Hay dueño: resetea "sin dueño" y guarda equipo
             s_noOwnerSince = -1f;
             s_prevOwnerTeam = owner.teamId;
         }
         else
         {
-            // Sin dueño: inicia o continúa el temporizador
             if (s_noOwnerSince < 0f) s_noOwnerSince = Time.time;
         }
 
         bool haveOwner = owner != null;
 
-        // ourBall “efectivo” con retardo: si NO hay dueño pero aún no pasa el delay,
-        // nos quedamos en ataque si el último dueño fue nuestro equipo.
+        // ourBall “efectivo” con retardo
         bool ourBallEffective = false;
-        if (haveOwner)
-        {
-            ourBallEffective = (owner.teamId == pc.teamId);
-        }
+        if (haveOwner) ourBallEffective = (owner.teamId == pc.teamId);
         else
         {
             bool weWereLast = (s_prevOwnerTeam.HasValue && s_prevOwnerTeam.Value.Equals(pc.teamId));
             bool delayActive = (s_noOwnerSince >= 0f) && ((Time.time - s_noOwnerSince) < neutralDelayAfterNoOwner);
-            ourBallEffective = weWereLast && delayActive; // mantenemos ATAQUE durante el grace period
+            ourBallEffective = weWereLast && delayActive;
         }
 
         // ====== Selección de banco según estado EFECTIVO ======
-        Transform[] bank = GetBank(ourBallEffective, haveOwner);
+        Transform[] bank = GetBank(ourBallEffective, haveOwner, out int bankType);
         if (bank == null || bank.Length == 0)
         {
             Vector2 dyn = DynamicFallback(ourBallEffective, haveOwner, slotIndex);
@@ -111,8 +154,18 @@ public class TeammateAI : MonoBehaviour
         var occupied = GetOccupiedSpotIndicesByMyTeam(bank, exclude: this);
         if (reservedForPlayer >= 0) occupied.Add(reservedForPlayer);
 
-        // 3) Elegir spot (con stickiness, closest-wins, etc.)
+        // 3) Elegir spot (con stickiness, closest-wins, tie-break por bias)
         int chosen = ChooseSpot(bank, occupied, reservedForPlayer);
+
+        // 3.1) Intentar CLAIM de spot (lock por frame). Si está tomado, buscar otra opción libre.
+        if (chosen >= 0)
+        {
+            if (!SpotLock.TryClaim(pc.teamId, bankType, chosen, GetInstanceID()))
+            {
+                // Busca otra alternativa libre que pueda reclamar
+                chosen = FindFirstClaimable(bank, occupied, reservedForPlayer, bankType);
+            }
+        }
 
         if (chosen != _currentAssignedIndex)
         {
@@ -123,31 +176,84 @@ public class TeammateAI : MonoBehaviour
         Vector2 targetPos = (chosen >= 0) ? (Vector2)bank[chosen].position
                                           : DynamicFallback(ourBallEffective, haveOwner, slotIndex);
 
+        // Aplicar micro-órbita (separa visualmente aunque tengan el mismo target lógico)
+        targetPos += OrbitOffset();
+
         MoveTowardsWithSeparation(targetPos);
     }
 
+    // Encuentra el primer spot que además pueda "reclamar"
+    int FindFirstClaimable(Transform[] bank, HashSet<int> occupied, int reservedForPlayer, int bankType)
+    {
+        int n = bank.Length;
+        // 1) intentar por slotIndex
+        if (IsFree(bank, n, slotIndex, occupied, reservedForPlayer) &&
+            SpotLock.TryClaim(pc.teamId, bankType, slotIndex, GetInstanceID()))
+            return slotIndex;
+
+        // 2) por cercanía
+        int best = -1; float bestD2 = float.PositiveInfinity;
+        for (int i = 0; i < n; i++)
+        {
+            if (!IsFree(bank, n, i, occupied, reservedForPlayer)) continue;
+            if (!SpotLock.TryClaim(pc.teamId, bankType, i, GetInstanceID())) continue;
+
+            float d2 = (bank[i].position - transform.position).sqrMagnitude;
+            if (d2 < bestD2) { bestD2 = d2; best = i; }
+        }
+        return best;
+    }
+
+    Vector2 OrbitOffset()
+    {
+        if (orbitRadius <= 0f) return Vector2.zero;
+        // Pequeña rotación contínua para no quedarse estático uno sobre otro
+        float a = _orbitAngle + (Time.time * 0.35f); // velocidad bajita
+        return new Vector2(Mathf.Cos(a), Mathf.Sin(a)) * orbitRadius;
+    }
+
     // -------------------- Asignación de spot --------------------
+
+    // Sesgo tiny para desempatar cercanías en el MISMO FRAME
+    float BiasFor(PlayerController who)
+    {
+        if (!who) return 0f;
+        return Mathf.Abs(who.GetInstanceID() % 997) * 1e-6f; // tiny bias
+    }
+
+    float DistanceSqrWithBias(Transform spot, PlayerController who)
+    {
+        if (!spot || !who) return float.PositiveInfinity;
+        float d2 = (spot.position - who.transform.position).sqrMagnitude;
+        return d2 + BiasFor(who);
+    }
+
+    bool IsFree(Transform[] bank, int n, int idx, HashSet<int> occupied, int reservedForPlayer)
+    {
+        return idx >= 0 && idx < n && bank[idx] != null && !occupied.Contains(idx) && idx != reservedForPlayer;
+    }
 
     int ChooseSpot(Transform[] bank, HashSet<int> occupied, int reservedForPlayer)
     {
         int n = bank.Length;
 
-        bool Free(int idx) => idx >= 0 && idx < n && !occupied.Contains(idx) && bank[idx] != null;
+        bool Free(int idx) => IsFree(bank, n, idx, occupied, reservedForPlayer);
 
         bool IAmClosest(int idx)
         {
             if (idx < 0 || idx >= n || bank[idx] == null) return false;
 
-            float myD = (bank[idx].position - transform.position).sqrMagnitude;
+            float myD = DistanceSqrWithBias(bank[idx], pc);
 
             var human = PlayerController.CurrentControlled;
             if (human && human.teamId == pc.teamId)
             {
-                float hd = (bank[idx].position - human.transform.position).sqrMagnitude;
+                float hd = DistanceSqrWithBias(bank[idx], human);
                 if (hd <= myD - (stickinessGain * stickinessGain)) return false;
             }
 
-            foreach (var other in FindObjectsOfType<PlayerController>())
+            var others = Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
+            foreach (var other in others)
             {
                 if (other == null || other.teamId != pc.teamId || other == pc) continue;
 
@@ -157,10 +263,10 @@ public class TeammateAI : MonoBehaviour
 
                 bool aiOurBall, aiHaveOwner;
                 GetStateFor(ai, out aiOurBall, out aiHaveOwner);
-                var aiBank = ai.GetBank(aiOurBall, aiHaveOwner);
+                var aiBank = ai.GetBank(aiOurBall, aiHaveOwner, out _);
                 if (aiBank != bank) continue;
 
-                float od = (bank[idx].position - other.transform.position).sqrMagnitude;
+                float od = DistanceSqrWithBias(bank[idx], other);
                 if (od <= myD - (stickinessGain * stickinessGain)) return false;
             }
             return true;
@@ -168,6 +274,7 @@ public class TeammateAI : MonoBehaviour
 
         bool CooldownActive() => (Time.time - _lastAssignTime) < reassignmentCooldown;
 
+        // Mantener spot actual si sigue siendo válido
         if (_currentAssignedIndex >= 0 && _currentAssignedIndex < n && bank[_currentAssignedIndex] != null)
         {
             bool reservedHit = (_currentAssignedIndex == reservedForPlayer);
@@ -178,25 +285,28 @@ public class TeammateAI : MonoBehaviour
                 return _currentAssignedIndex;
         }
 
-        if (Free(slotIndex) && slotIndex != reservedForPlayer && IAmClosest(slotIndex))
+        // Intentar el spot por defecto de mi slot, si es libre y soy el más cercano
+        if (Free(slotIndex) && IAmClosest(slotIndex))
             return slotIndex;
 
+        // Buscar el mejor libre donde YO sea el más cercano (con bias)
         int best = -1; float bestD2 = float.PositiveInfinity;
         for (int i = 0; i < n; i++)
         {
-            if (!Free(i) || i == reservedForPlayer) continue;
+            if (!Free(i)) continue;
             if (!IAmClosest(i)) continue;
 
-            float d2 = (bank[i].position - transform.position).sqrMagnitude;
+            float d2 = DistanceSqrWithBias(bank[i], pc);
             if (d2 < bestD2) { bestD2 = d2; best = i; }
         }
         if (best >= 0) return best;
 
+        // Si no hay ninguno donde yo sea el más cercano, elegir el más cercano libre
         best = -1; bestD2 = float.PositiveInfinity;
         for (int i = 0; i < n; i++)
         {
-            if (!Free(i) || i == reservedForPlayer) continue;
-            float d2 = (bank[i].position - transform.position).sqrMagnitude;
+            if (!Free(i)) continue;
+            float d2 = DistanceSqrWithBias(bank[i], pc);
             if (d2 < bestD2) { bestD2 = d2; best = i; }
         }
         return best;
@@ -204,22 +314,24 @@ public class TeammateAI : MonoBehaviour
 
     // -------------------- Helpers de ocupación/estado --------------------
 
-    Transform[] GetBank(bool ourBall, bool haveOwner)
+    Transform[] GetBank(bool ourBall, bool haveOwner, out int bankType)
     {
+        // bankType: 0 attack, 1 defend, 2 neutral
         Transform[] localBank = null;
-        if (ourBall) localBank = attackSpots;
-        else if (haveOwner) localBank = defendSpots;
-        else localBank = neutralSpots;
+
+        if (ourBall) { localBank = attackSpots; bankType = 0; }
+        else if (haveOwner) { localBank = defendSpots; bankType = 1; }
+        else { localBank = neutralSpots; bankType = 2; }
 
         bool completeLocal = localBank != null && localBank.Length >= 3 && localBank.All(t => t != null);
         if (completeLocal) return localBank;
 
         var tz = TeamZones.Instance;
-        if (!tz) return null;
+        if (!tz) { bankType = 2; return null; }
 
-        if (ourBall) return tz.attackSpots;
-        else if (haveOwner) return tz.defendSpots;
-        else return tz.neutralSpots;
+        if (ourBall) { bankType = 0; return tz.attackSpots; }
+        else if (haveOwner) { bankType = 1; return tz.defendSpots; }
+        else { bankType = 2; return tz.neutralSpots; }
     }
 
     int ClosestSpotIndex(Transform[] bank, Vector3 pos, float maxRadius)
@@ -238,7 +350,7 @@ public class TeammateAI : MonoBehaviour
     HashSet<int> GetOccupiedSpotIndicesByMyTeam(Transform[] bank, TeammateAI exclude)
     {
         var set = new HashSet<int>();
-        var allPlayers = Object.FindObjectsOfType<PlayerController>();
+        var allPlayers = Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
         foreach (var p in allPlayers)
         {
             if (p == null || p.teamId != pc.teamId) continue;
@@ -255,7 +367,7 @@ public class TeammateAI : MonoBehaviour
 
             bool aiOurBall, aiHaveOwner;
             GetStateFor(ai, out aiOurBall, out aiHaveOwner);
-            var aiBank = ai.GetBank(aiOurBall, aiHaveOwner);
+            var aiBank = ai.GetBank(aiOurBall, aiHaveOwner, out _);
             if (aiBank != bank) continue;
 
             int idx = ClosestSpotIndex(bank, ai.transform.position, occupancyRadius);
@@ -274,7 +386,6 @@ public class TeammateAI : MonoBehaviour
         if (haveOwner) ourBall = (ball.Owner.teamId == other.pc.teamId);
         else
         {
-            // Misma lógica de grace period para los otros (consistente)
             bool weWereLast = s_prevOwnerTeam.HasValue && s_prevOwnerTeam.Value.Equals(other.pc.teamId);
             bool delayActive = (s_noOwnerSince >= 0f) && ((Time.time - s_noOwnerSince) < other.neutralDelayAfterNoOwner);
             ourBall = weWereLast && delayActive;
@@ -312,7 +423,7 @@ public class TeammateAI : MonoBehaviour
     Vector2 ComputeSeparation()
     {
         Vector2 acc = Vector2.zero;
-        var all = Object.FindObjectsOfType<PlayerController>();
+        var all = Object.FindObjectsByType<PlayerController>(FindObjectsSortMode.None);
         foreach (var other in all)
         {
             if (other == null || other.teamId != pc.teamId || other == pc) continue;

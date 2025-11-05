@@ -315,6 +315,12 @@ MonoBehaviour:
   arriveRadius: 0.15
   slowRadius: 1.2
   playerClaimRadius: 20
+  occupancyRadius: 0.45
+  stickinessGain: 0.15
+  reassignmentCooldown: 0.35
+  separationRadius: 0.9
+  separationWeight: 0.6
+  neutralDelayAfterNoOwner: 2
 --- !u!1 &2147103095550678657
 GameObject:
   m_ObjectHideFlags: 0
@@ -340,7 +346,7 @@ Transform:
   m_GameObject: {fileID: 2147103095550678657}
   serializedVersion: 2
   m_LocalRotation: {x: -0, y: -0, z: -0, w: 1}
-  m_LocalPosition: {x: 0.84, y: 0, z: 0}
+  m_LocalPosition: {x: 1.77, y: 0, z: 0}
   m_LocalScale: {x: 1.1764705, y: 0.6666667, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
