@@ -15,8 +15,9 @@ public class BallController : MonoBehaviour
     [Header("Stick-to-owner")]
     [Min(0f)] public float stickSmoothing = 25f;
 
-    [Header("Pickup cooldown (s)")]
+    [Header("Pickup")]
     [SerializeField, Min(0f)] private float pickupBlockSeconds = 0.2f;
+    [SerializeField, Min(0f)] private float pickupRadius = 0.35f;   // <= OPCIÓN A: radio para validar cercanía al anchor
 
     [Header("Colliders")]
     public Collider2D solidCollider;
@@ -31,7 +32,7 @@ public class BallController : MonoBehaviour
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private Color normalColor = Color.white;
     [SerializeField] private Color stoneColor = new Color(0.6f, 0.6f, 0.6f);
-    [SerializeField] private Color ghostColor = new Color(1f, 0f, 0f); // (no se usa directamente, mantenido por compatibilidad)
+    [SerializeField] private Color ghostColor = new Color(1f, 0f, 0f); // (compatibilidad)
 
     // -------- Ghost Ball ----------
     [Header("Ghost Ball (global/per-collider)")]
@@ -103,7 +104,7 @@ public class BallController : MonoBehaviour
     private readonly List<Collider2D> _temporarilyIgnored = new();
     private float _passGhostEndsAt = -1f;
     private PlayerController _intendedReceiver = null;
-    
+
     void Awake()
     {
         if (Instance != null && Instance != this) Destroy(gameObject);
@@ -144,29 +145,52 @@ public class BallController : MonoBehaviour
 
         _ = IsStoneActive();
     }
-    
-    void OnTriggerEnter2D(Collider2D other)
+
+    // ======= OPCIÓN A: pickup universal por componente =======
+    private void OnTriggerEnter2D(Collider2D other)
     {
-        // PICKUP NORMAL
-        if (!IsPossessed && other.CompareTag("Player"))
-        {
-            var pc = other.GetComponent<PlayerController>();
-            if (!pc) return;
-            if (Time.time < pickupBlockUntil && pc != _intendedReceiver) return;
-            Take(pc);
-            return;
-        }
+        // Intento de pickup primero; si la tomó, no detonamos shockwave
+        if (TryPickup(other)) return;
 
         // SHOCKWAVE TRIGGER
         if (shockwaveArmed && !shockwaveRunning)
         {
-            // evita detonar con el propio dueño
             if (ignoreOwner && Owner && other.GetComponentInParent<PlayerController>() == Owner)
                 return;
 
             StartCoroutine(ShockwaveRoutine());
         }
     }
+
+    private void OnTriggerStay2D(Collider2D other)
+    {
+        // Reintenta pickup mientras permanezca dentro del trigger
+        TryPickup(other);
+    }
+
+    /// <summary>
+    /// Permite que cualquier PlayerController cercano a su ballAnchor tome la bola.
+    /// Respeta el pickupBlockUntil para pases dirigidos.
+    /// </summary>
+    private bool TryPickup(Collider2D col)
+    {
+        // Si no permites robos durante posesión, sal si ya hay dueño:
+        if (IsPossessed) return false;
+
+        var pc = col.GetComponentInParent<PlayerController>();
+        if (!pc || !pc.ballAnchor) return false;
+
+        // Si la bola viene de un pase reciente, solo el receptor intencionado puede tomarla
+        if (Time.time < pickupBlockUntil && pc != _intendedReceiver) return false;
+
+        // Verifica cercanía real al ballAnchor
+        Vector2 a = pc.ballAnchor.position;
+        if (((Vector2)transform.position - a).sqrMagnitude > pickupRadius * pickupRadius) return false;
+
+        Take(pc);
+        return true;
+    }
+    // =========================================================
 
     // ----------- API -----------
     public void Take(PlayerController newOwner)
@@ -317,9 +341,6 @@ public class BallController : MonoBehaviour
     }
 
     // ---------- API Ghost Ball ----------
-    /// <summary>
-    /// Activa la bola fantasma (ignora colisiones con enemigos y puede apagar el sólido).
-    /// </summary>
     public void ActivateGhost(float seconds, string enemyLayerName = null)
     {
         if (seconds <= 0f) return;
@@ -333,7 +354,6 @@ public class BallController : MonoBehaviour
 
         if (_ghostBallLayer >= 0 && enemyLayer >= 0)
         {
-            // Si ya estaba aplicado contra otra capa, revierte la anterior
             if (_ghostApplied && _ghostEnemyLayer >= 0 && (_ghostEnemyLayer != enemyLayer))
             {
                 Physics2D.IgnoreLayerCollision(_ghostBallLayer, _ghostEnemyLayer, false);
@@ -352,7 +372,7 @@ public class BallController : MonoBehaviour
             Debug.LogWarning($"[BallController] GhostBall: capas no válidas. Ball='{ballLayerName}'({_ghostBallLayer}) Enemy='{layerToUse}'({enemyLayer}). Se usará ignore por collider si está activo.");
         }
 
-        // 2) Opcional (recomendado): ignorar por collider a todo lo que tenga tag Enemy
+        // 2) Ignorar por collider (opcional)
         if (ghostIgnorePerCollider)
             ApplyGhostIgnorePerCollider();
 
@@ -370,7 +390,6 @@ public class BallController : MonoBehaviour
             _solidPrevEnabled = solidCollider.enabled;
             solidCollider.enabled = false;
             _ghostSolidDisabled = true;
-            // De paso, desactiva PassGhost por-collider si estuviera activo
             EndPassGhost();
         }
 
@@ -379,36 +398,28 @@ public class BallController : MonoBehaviour
         _ghostActiveUntil = Mathf.Max(_ghostActiveUntil, until);
     }
 
-    /// <summary>
-    /// Desactiva la bola fantasma y restaura colisiones/visual/collider sólido.
-    /// </summary>
     public void DeactivateGhost()
     {
-        // Revertir capa global
         if (_ghostApplied && _ghostBallLayer >= 0 && _ghostEnemyLayer >= 0)
             Physics2D.IgnoreLayerCollision(_ghostBallLayer, _ghostEnemyLayer, false);
 
         _ghostApplied = false;
         _ghostActiveUntil = -1f;
 
-        // Revertir ignores por collider
         RevertGhostIgnorePerCollider();
 
-        // Restaurar collider sólido si lo apagamos por Ghost
         if (_ghostSolidDisabled && solidCollider)
         {
             solidCollider.enabled = _solidPrevEnabled;
             _ghostSolidDisabled = false;
         }
 
-        // Restaurar visual
         if (spriteRenderer)
             spriteRenderer.color = _originalColor;
     }
 
     private void ApplyGhostIgnorePerCollider()
     {
-        // Limpia registro previo si re-aplican durante el efecto
         RevertGhostIgnorePerCollider();
         _ghostIgnoredEnemyColliders.Clear();
 
