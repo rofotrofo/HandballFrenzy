@@ -48,8 +48,8 @@ public class BallController : MonoBehaviour
     [Tooltip("Ignorar por collider además de por capa (más robusto si hay hijos con capas distintas)")]
     public bool ghostIgnorePerCollider = true;
 
-    [Tooltip("Apaga el collider sólido mientras esté activo el ghost")]
-    public bool disableSolidColliderDuringGhost = true;
+    [Tooltip("Antes se apagaba el collider sólido en ghost. Ahora se mantiene para seguir chocando con 'Limit'.")]
+    public bool disableSolidColliderDuringGhost = false;
 
     [Tooltip("Alpha cuando está activa la bola fantasma (feedback)")]
     [Range(0f, 1f)] public float ghostAlpha = 0.45f;
@@ -60,13 +60,12 @@ public class BallController : MonoBehaviour
     private bool _ghostApplied = false;
     private Color _originalColor;
 
-    // Control del collider sólido durante ghost
+    // Control previo (se conserva por compatibilidad, pero ya no se apaga el sólido)
     private bool _ghostSolidDisabled = false;
     private bool _solidPrevEnabled = true;
 
     // Registro de ignores por collider para revertir
     private readonly List<Collider2D> _ghostIgnoredEnemyColliders = new();
-    // ---------------------------------------------------------------
 
     // -------- Stone Ball ----------
     public enum BallMode { Normal, Stone }
@@ -297,11 +296,9 @@ public class BallController : MonoBehaviour
         }
         if (solidCollider)
         {
-            // Si Ghost apagó el sólido, no lo enciendas por error
-            if (_ghostSolidDisabled)
-                solidCollider.enabled = false;
-            else
-                solidCollider.enabled = !possessed;
+            // Mantener el sólido activo para que siempre colisione con "Limit".
+            // Si Ghost necesitara ignorar algo, se hace por capa/collider selectivo (ver ActivateGhost).
+            solidCollider.enabled = !possessed;
         }
     }
 
@@ -345,7 +342,7 @@ public class BallController : MonoBehaviour
     {
         if (seconds <= 0f) return;
 
-        // 1) Intento por capas (global)
+        // 1) Ignorar por capas (global) contra Enemy, pero NO contra Limit.
         if (_ghostBallLayer < 0)
             _ghostBallLayer = LayerMask.NameToLayer(ballLayerName);
 
@@ -372,7 +369,7 @@ public class BallController : MonoBehaviour
             Debug.LogWarning($"[BallController] GhostBall: capas no válidas. Ball='{ballLayerName}'({_ghostBallLayer}) Enemy='{layerToUse}'({enemyLayer}). Se usará ignore por collider si está activo.");
         }
 
-        // 2) Ignorar por collider (opcional)
+        // 2) Ignorar por collider (opcional) SOLO enemigos (no límites)
         if (ghostIgnorePerCollider)
             ApplyGhostIgnorePerCollider();
 
@@ -384,14 +381,9 @@ public class BallController : MonoBehaviour
             spriteRenderer.color = c;
         }
 
-        // 4) Apagar collider sólido mientras dure el ghost
-        if (disableSolidColliderDuringGhost && solidCollider && !_ghostSolidDisabled)
-        {
-            _solidPrevEnabled = solidCollider.enabled;
-            solidCollider.enabled = false;
-            _ghostSolidDisabled = true;
-            EndPassGhost();
-        }
+        // 4) Antes se apagaba el collider sólido en ghost. YA NO.
+        //    Se mantiene activo para seguir colisionando con "Limit".
+        _ghostSolidDisabled = false;
 
         // 5) Extiende duración
         float until = Time.time + seconds;
@@ -408,9 +400,11 @@ public class BallController : MonoBehaviour
 
         RevertGhostIgnorePerCollider();
 
-        if (_ghostSolidDisabled && solidCollider)
+        // Asegurar que el sólido queda como estaba
+        if (solidCollider)
         {
-            solidCollider.enabled = _solidPrevEnabled;
+            if (_ghostSolidDisabled)
+                solidCollider.enabled = _solidPrevEnabled;
             _ghostSolidDisabled = false;
         }
 
@@ -431,6 +425,7 @@ public class BallController : MonoBehaviour
             foreach (var ec in enemyCols)
             {
                 if (!ec || !ec.enabled) continue;
+                // Ignorar contra el sólido y el trigger, pero NUNCA tocar "Limit".
                 if (solidCollider) Physics2D.IgnoreCollision(solidCollider, ec, true);
                 if (triggerCollider) Physics2D.IgnoreCollision(triggerCollider, ec, true);
                 _ghostIgnoredEnemyColliders.Add(ec);

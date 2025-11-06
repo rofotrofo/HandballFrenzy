@@ -3,27 +3,40 @@ using UnityEngine.SceneManagement;
 
 public static class SceneFlow
 {
-    // Pon los nombres EXACTOS como están en Build Settings
+    // Nombres EXACTOS como en Build Settings
     public const string MainMenu = "MainMenu";
     public const string Game     = "Game";
 
-    /// Carga el menú principal (estado fresco).
+    /// Ir al menú (estado fresco).
     public static void LoadMenu()
     {
-        CleanupStatics();
+        // No queremos boot automático de partido al cargar menú
+        if (MatchTimer.Instance != null) MatchTimer.PendingNewMatch = false;
+
+        // Opcional: apaga HUD persistente para que el menú quede limpio
+        if (HudPersist.Instance != null)
+            HudPersist.Instance.gameObject.SetActive(false);
+
+        // Opcional: reset de marcador al salir al menú
+        if (ScoreManager.Instance != null)
+            ScoreManager.Instance.ResetScore();
+
         Time.timeScale = 1f;
         SceneManager.LoadScene(MainMenu, LoadSceneMode.Single);
     }
 
-    /// Carga la escena del juego (estado fresco).
+    /// Ir al juego (boot limpio al cargar la escena).
     public static void LoadGame()
     {
-        CleanupStatics();
+        // Señal para que MatchTimer inicialice TODO al entrar a la escena
+        MatchTimer.PendingNewMatch = true;
+
+        // Nos aseguramos de no llegar pausados
         Time.timeScale = 1f;
+
         SceneManager.LoadScene(Game, LoadSceneMode.Single);
     }
 
-    /// Salir del juego (funciona en build; en editor, detiene Play).
     public static void Quit()
     {
 #if UNITY_EDITOR
@@ -31,15 +44,5 @@ public static class SceneFlow
 #else
         Application.Quit();
 #endif
-    }
-
-    /// Punto único para limpiar estáticos/singletons si alguno quedara colgado.
-    static void CleanupStatics()
-    {
-        // Ejemplos: si tus singletons usan .Instance estática, asegúrate que OnDestroy las ponga en null.
-        // Aquí puedes forzar limpiezas si hiciera falta:
-        // BallController.Instance = null;   // NO necesario si tu OnDestroy ya lo hace.
-        // TeamRegistry.Clear();             // Si tienes un registro estático, límpialo aquí.
-        // Cualquier otro cache/estado global que quieras resetear al cambiar de escena.
     }
 }

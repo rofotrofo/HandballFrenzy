@@ -3,13 +3,15 @@ using UnityEngine;
 [RequireComponent(typeof(Collider2D))]
 public class GoalTrigger : MonoBehaviour
 {
-
     [Header("¿Quién defiende ESTA portería?")]
     [SerializeField] private TeamId ownerTeam = TeamId.Red;
 
     [Header("Opcional")]
     [Tooltip("Si está activo, destruye la pelota al cruzar la línea de gol.")]
     [SerializeField] private bool destroyBallOnContact = true;
+
+    // Flag para evitar contar doble
+    private bool goalRegistered = false;
 
     private TeamId Opponent(TeamId t) => (t == TeamId.Blue) ? TeamId.Red : TeamId.Blue;
 
@@ -19,14 +21,18 @@ public class GoalTrigger : MonoBehaviour
         var ball = other.GetComponentInParent<BallController>();
         if (!ball) return;
 
-        // 1) Determina quién anotó (el contrario al dueño de la portería)
+        // Evita doble conteo
+        if (goalRegistered) return;
+        goalRegistered = true;
+
+        // Determina quién anotó (el contrario al dueño de la portería)
         TeamId scoringTeam = Opponent(ownerTeam);
 
-        // 2) Suma el gol en el marcador
+        // Suma el gol en el marcador
         if (ScoreManager.Instance != null)
             ScoreManager.Instance.AddGoal(scoringTeam);
 
-        // 3) Notifica al MatchTimer / flujo de gol, si usas uno
+        // Notifica al MatchTimer / flujo de gol, si usas uno
         if (MatchTimer.Instance != null)
         {
             // Si tu MatchTimer ya tiene esta firma, úsala:
@@ -43,8 +49,16 @@ public class GoalTrigger : MonoBehaviour
             if (goalUI != null) goalUI.ShowGoal();
         }
 
-        // 4) Opcional: destruir pelota (si tu flujo así lo prefiere)
+        // Opcional: destruir pelota (si tu flujo así lo prefiere)
         if (destroyBallOnContact)
             Destroy(ball.gameObject);
+
+        // Reactiva el trigger después de un pequeño delay
+        Invoke(nameof(ResetGoalFlag), 0.5f);
+    }
+
+    private void ResetGoalFlag()
+    {
+        goalRegistered = false;
     }
 }

@@ -21,9 +21,7 @@ public class PlayerController : MonoBehaviour
     public float slipDecel = 3f;
 
     [Header("Directional Pass")]
-    [Tooltip("Apertura del cono direccional para encontrar compañero (grados).")]
     [Range(1f, 60f)] public float directionalMaxAngleDeg = 20f;
-    [Tooltip("Componente mínima hacia adelante (0-1) para considerar a un compañero en el cono.")]
     [Min(0f)] public float directionalMinForward = 0.05f;
 
     [Header("Post Action")]
@@ -33,15 +31,11 @@ public class PlayerController : MonoBehaviour
     [Range(0f, 1f)] public float postActionSlipStartFactor = 0.6f;
     public float postActionSlipExtraDecel = 8f;
 
-    // ---- TIRO CON PUNTERÍA ENTRE POSTES ----
     [Header("Shoot Aiming (posts)")]
     public Transform leftPost;
     public Transform rightPost;
-    [Tooltip("Flecha/puntero; déjala desactivada en el prefab")]
     public Transform aimArrow;
-    [Tooltip("Ciclos por segundo de la oscilación (ida y vuelta)")]
     public float aimOscillationHz = 1.2f;
-    [Tooltip("Si pierdes la posesión mientras apuntas, cancelamos")]
     public bool autoCancelIfNoOwner = true;
 
     private bool isAiming = false;
@@ -71,6 +65,47 @@ public class PlayerController : MonoBehaviour
     private static TeamId _humanTeamId;
     private static bool _humanTeamSet = false;
 
+    // ===================== R O U T E R   D E   I N P U T   G L O B A L =====================
+
+    /// <summary>
+    /// Llama esto desde tu callback de movimiento del Input System.
+    /// Ej: OnMove(InputAction.CallbackContext ctx) { PlayerController.SetGlobalMoveInput(ctx.ReadValue<Vector2>()); }
+    /// </summary>
+    public static void SetGlobalMoveInput(Vector2 v)
+    {
+        if (CurrentControlled != null)
+            CurrentControlled.InternalSetMoveInput(v);
+    }
+
+    /// <summary>
+    /// Llama desde tu callback del botón de pase (en vez de llamar a la instancia).
+    /// </summary>
+    public static void GlobalActionPass()
+    {
+        if (CurrentControlled != null)
+            CurrentControlled.ActionPass();
+    }
+
+    /// <summary>
+    /// Llama desde tu callback del botón de soltar.
+    /// </summary>
+    public static void GlobalActionDrop()
+    {
+        if (CurrentControlled != null)
+            CurrentControlled.ActionDrop();
+    }
+
+    /// <summary>
+    /// Llama desde tu callback del botón de tiro.
+    /// </summary>
+    public static void GlobalActionShoot()
+    {
+        if (CurrentControlled != null)
+            CurrentControlled.ActionShoot();
+    }
+
+    // =======================================================================================
+
     void Awake()
     {
         rb = GetComponent<Rigidbody2D>();
@@ -95,16 +130,16 @@ public class PlayerController : MonoBehaviour
 
     void OnDestroy() => TeamRegistry.Unregister(this);
 
-    // Input de movimiento (WASD) del jugador humano
+    // Input de movimiento (WASD) si te siguen llamando por instancia (back-compat).
+    // Lo dejamos, pero la recomendación es usar SetGlobalMoveInput.
     public void SetMoveInput(Vector2 v)
     {
-        CurrentControlled = this; // este pasa a ser el controlado
-        if (!_humanTeamSet)
-        {
-            _humanTeamId = teamId;
-            _humanTeamSet = true;
-        }
+        if (this != CurrentControlled) return;
+        InternalSetMoveInput(v);
+    }
 
+    private void InternalSetMoveInput(Vector2 v)
+    {
         if (Time.time < freezeUntil) return;
         moveInput = v;
     }
@@ -117,7 +152,7 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
-        // 1) Auto-switch de control al receptor de tu equipo al cambiar posesión
+        // 1) Auto-switch de control al receptor de tu equipo al cambiar posesión real
         var ball = BallController.Instance;
         var owner = (ball != null) ? ball.Owner : null;
 
@@ -145,12 +180,15 @@ public class PlayerController : MonoBehaviour
             }
         }
 
-        // 3) Disparo humano: click derecho para empezar/soltar
-        var mouse = Mouse.current;
-        if (mouse != null)
+        // 3) Disparo humano con mouse SOLO si este es el jugador controlado
+        if (this == CurrentControlled)
         {
-            if (mouse.rightButton.wasPressedThisFrame) BeginAimShot();
-            if (mouse.rightButton.wasReleasedThisFrame) ConfirmAimShot();
+            var mouse = Mouse.current;
+            if (mouse != null)
+            {
+                if (mouse.rightButton.wasPressedThisFrame) BeginAimShot();
+                if (mouse.rightButton.wasReleasedThisFrame) ConfirmAimShot();
+            }
         }
 
         // 4) Actualizar puntero de tiro
@@ -266,6 +304,8 @@ public class PlayerController : MonoBehaviour
 
     public void ActionPass()
     {
+        if (this != CurrentControlled) return;
+
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
 
@@ -284,11 +324,15 @@ public class PlayerController : MonoBehaviour
         if (!target)
             target = TeamRegistry.GetClosestTeammate(this);
 
+        // Si no encontramos receptor, pase genérico hacia adelante
         if (!target)
         {
             ball.Pass(transform.up, passer: this);
             return;
         }
+
+        // Cambiar control inmediatamente al receptor previsto (equipo humano)
+        ForceSwitchControlTo(target);
 
         Vector2 to = target.ballAnchor ? (Vector2)target.ballAnchor.position
                                        : (Vector2)target.transform.position;
@@ -298,6 +342,8 @@ public class PlayerController : MonoBehaviour
 
     public void ActionDrop()
     {
+        if (this != CurrentControlled) return;
+
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
         if (stopOnRelease) Halt();
@@ -306,7 +352,11 @@ public class PlayerController : MonoBehaviour
 
     // ====================== SHOOT HUMANO ======================
 
-    public void ActionShoot() => BeginAimShot();
+    public void ActionShoot()
+    {
+        if (this != CurrentControlled) return;
+        BeginAimShot();
+    }
 
     private void BeginAimShot()
     {
@@ -321,8 +371,10 @@ public class PlayerController : MonoBehaviour
 
     private void ConfirmAimShot()
     {
+        if (!isAiming || this != CurrentControlled) { CancelAimShot(); return; }
+
         var ball = BallController.Instance;
-        if (!isAiming || !ball || ball.Owner != this) { CancelAimShot(); return; }
+        if (!ball || ball.Owner != this) { CancelAimShot(); return; }
         if (!leftPost || !rightPost) { CancelAimShot(); return; }
 
         float t = Mathf.PingPong((Time.time - aimStartTime) * aimOscillationHz, 1f);
@@ -342,10 +394,6 @@ public class PlayerController : MonoBehaviour
 
     // ====================== MÉTODOS PARA IA ======================
 
-    /// <summary>
-    /// Pase para IA. Si preferredDir tiene magnitud, prioriza un compañero dentro del cono en esa dirección;
-    /// si no, pasa al compañero más cercano. Si no encuentra receptor, suelta en esa dirección.
-    /// </summary>
     public void AIPass(Vector2 preferredDir, float coneAngleDeg = 25f, float minForward = 0.0f)
     {
         var ball = BallController.Instance;
@@ -371,32 +419,46 @@ public class PlayerController : MonoBehaviour
             return;
         }
 
+        // Pre-switch si el receptor es del equipo humano
+        ForceSwitchControlIfHumanTeam(target);
+
         Vector2 to = target.ballAnchor ? (Vector2)target.ballAnchor.position
                                        : (Vector2)target.transform.position;
 
         ball.PassTo(to, intendedReceiver: target, passer: this);
     }
 
-    /// <summary>
-    /// Tiro de IA entre postes. Elige un punto entre leftPost/rightPost con pequeño spread.
-    /// </summary>
     public void AIShootAtGoal(float spread = 0.12f, float power = 1f)
     {
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
         if (!leftPost || !rightPost)
         {
-            // Sin postes, mejor no arriesgar: suelta hacia adelante
             AIPass(transform.right, 20f, 0f);
             return;
         }
 
-        // Punto objetivo en la portería
         float t = Mathf.Clamp01(0.5f + Random.Range(-spread, spread));
         Vector2 aimPoint = Vector2.Lerp(leftPost.position, rightPost.position, t);
         Vector2 dir = (aimPoint - (Vector2)ball.transform.position).normalized;
 
         if (stopOnRelease) Halt();
         ball.Shoot(dir, power);
+    }
+
+    // ====================== HELPERS DE CONTROL ======================
+
+    private static void ForceSwitchControlTo(PlayerController p)
+    {
+        if (p == null) return;
+        if (_humanTeamSet && !p.teamId.Equals(_humanTeamId)) return;
+        CurrentControlled = p;
+    }
+
+    private static void ForceSwitchControlIfHumanTeam(PlayerController p)
+    {
+        if (p == null) return;
+        if (_humanTeamSet && p.teamId.Equals(_humanTeamId))
+            CurrentControlled = p;
     }
 }

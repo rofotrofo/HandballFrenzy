@@ -1,22 +1,17 @@
 using UnityEngine;
 using TMPro;
+using System.Collections;
 
 public class ScoreUI : MonoBehaviour
 {
-    [Header("Referencias a los textos del marcador")]
-    [SerializeField] private TextMeshProUGUI homeScoreText;     // Goles del jugador
-    [SerializeField] private TextMeshProUGUI visitorScoreText;  // Goles del IA
+    [SerializeField] private TextMeshProUGUI homeScoreText;    // Player/Home
+    [SerializeField] private TextMeshProUGUI visitorScoreText; // IA/Visitor
 
     private void OnEnable()
     {
-        if (ScoreManager.Instance != null)
-        {
-            // Suscribirse al evento de cambio de marcador
-            ScoreManager.Instance.OnScoreChanged += HandleScoreChanged;
-
-            // Mostrar el marcador actual al iniciar
-            HandleScoreChanged(ScoreManager.Instance.blueGoals, ScoreManager.Instance.redGoals);
-        }
+        TrySubscribe();
+        // Si aún no existe el ScoreManager, intenta suscribirte en cuanto aparezca
+        if (ScoreManager.Instance == null) StartCoroutine(WaitAndSubscribe());
     }
 
     private void OnDisable()
@@ -25,13 +20,28 @@ public class ScoreUI : MonoBehaviour
             ScoreManager.Instance.OnScoreChanged -= HandleScoreChanged;
     }
 
-    private void HandleScoreChanged(int blueGoals, int redGoals)
+    private void TrySubscribe()
     {
-        // Suponiendo que Blue = jugador (home) y Red = IA (visitor)
-        if (homeScoreText != null)
-            homeScoreText.text = blueGoals.ToString();
+        if (ScoreManager.Instance == null) return;
+        ScoreManager.Instance.OnScoreChanged -= HandleScoreChanged; // evita doble sub
+        ScoreManager.Instance.OnScoreChanged += HandleScoreChanged;
+        HandleScoreChanged(ScoreManager.Instance.homeGoals, ScoreManager.Instance.visitorGoals);
+    }
 
-        if (visitorScoreText != null)
-            visitorScoreText.text = redGoals.ToString();
+    private System.Collections.IEnumerator WaitAndSubscribe()
+    {
+        // reintenta por si ScoreManager se crea un frame después
+        for (int i = 0; i < 30; i++) // ~0.5s
+        {
+            if (ScoreManager.Instance != null) { TrySubscribe(); yield break; }
+            yield return null;
+        }
+        Debug.LogWarning("No se encontró ScoreManager para ScoreUI.");
+    }
+
+    private void HandleScoreChanged(int home, int visitor)
+    {
+        if (homeScoreText)    homeScoreText.text = home.ToString();
+        if (visitorScoreText) visitorScoreText.text = visitor.ToString();
     }
 }

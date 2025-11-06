@@ -8,22 +8,28 @@ public class MatchTimer : MonoBehaviour
 {
     public static MatchTimer Instance { get; private set; }
 
-    // 👉 Flag global para bloquear movimiento durante el countdown
     public static bool CountdownActive { get; private set; } = false;
+
+    // Bandera para arrancar un partido “desde cero” al cargar la escena de juego
+    public static bool PendingNewMatch = false;
 
     [Header("Duraciones")]
     [Tooltip("Duración de CADA mitad en segundos (1:30 = 90)")]
     public float halfDurationSeconds = 90f;
-    [Tooltip("Cuenta atrás al iniciar escena y tras gol")]
+    [Tooltip("Cuenta atrás al iniciar escena, tras gol y al iniciar 2H")]
     public float countdownSeconds = 3f;
     [Tooltip("Duración del banner de GOOOOL (si usas GoalUIManager aparte)")]
     public float goalBannerSeconds = 1.5f;
 
-    [Header("UI (asigna en el Canvas de la escena)")]
+    [Header("HUD (Canvas actual)")]
     public TMP_Text clockText;        // mm:ss
     public TMP_Text halfText;         // "1H" / "2H"
     public GameObject countdownPanel; // panel centrado
     public TMP_Text countdownText;    // 3..2..1..
+
+    [Header("Fin de juego")]
+    [Tooltip("Panel de Fin de Juego (desactivado por defecto) que quieres mostrar en Full Time.")]
+    public GameObject endOfGamePanel;
 
     [Header("Opcional: usar GoalUIManager si ya lo tienes")]
     public GoalUIManager goalUIManager;
@@ -33,6 +39,7 @@ public class MatchTimer : MonoBehaviour
     private float timeLeft;           // tiempo restante de la mitad
     private bool running = false;     // el reloj corre
     private bool handlingGoal = false;
+    private bool fullTimeShown = false;
 
     void Awake()
     {
@@ -50,14 +57,15 @@ public class MatchTimer : MonoBehaviour
 
     void Start()
     {
-        // Arranque: mitad 1 y countdown inicial
+        // Primer arranque (si la escena de juego abre con este objeto presente)
         ResetHalf(1);
+        HideEndGamePanelIfAny();
         StartCoroutine(StartFlowWithCountdown());
     }
 
     void Update()
     {
-        if (!running) return;
+        if (!running || fullTimeShown) return;
 
         timeLeft -= Time.deltaTime;
         if (timeLeft < 0f) timeLeft = 0f;
@@ -69,12 +77,13 @@ public class MatchTimer : MonoBehaviour
             running = false;
             if (currentHalf == 1)
             {
-                // Cambio a segunda mitad con countdown
-                StartCoroutine(SwitchHalfWithCountdown(2));
+                // Fin 1H → recarga y arranca 2H con countdown
+                StartCoroutine(HalfFlow(2));
             }
             else
             {
-                // Partido terminado (puedes mostrar "Full Time" aquí si quieres)
+                // FULL TIME → pausa y panel final
+                ShowFullTimePanelAndPause();
             }
         }
     }
@@ -83,7 +92,7 @@ public class MatchTimer : MonoBehaviour
 
     public void OnGoalScored()
     {
-        if (handlingGoal) return;
+        if (handlingGoal || fullTimeShown) return;
         StartCoroutine(GoalFlow());
     }
 
@@ -93,47 +102,55 @@ public class MatchTimer : MonoBehaviour
     {
         running = false;
         SetHudVisible(false);
-        yield return CountdownCoroutine(); // CountdownActive true durante el conteo
+        yield return CountdownCoroutine();
         SetHudVisible(true);
         running = true;
     }
 
-    private IEnumerator SwitchHalfWithCountdown(int nextHalf)
+    /// Flujo al terminar una mitad (recarga escena, arranca siguiente mitad).
+    private IEnumerator HalfFlow(int nextHalf)
     {
-        currentHalf = nextHalf;
-        ResetHalf(currentHalf);
-        UpdateHalfUI();
+        handlingGoal = true;
 
         running = false;
         SetHudVisible(false);
+        HideEndGamePanelIfAny();
+        Time.timeScale = 1f; // por si acaso
+
+        // Recarga la misma escena para resetear posiciones/bola
+        var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
+        while (!op.isDone) yield return null;
+
+        ResetHalf(nextHalf);
+        UpdateHalfUI();
+
         yield return CountdownCoroutine();
+
         SetHudVisible(true);
         running = true;
+        handlingGoal = false;
     }
 
     private IEnumerator GoalFlow()
     {
         handlingGoal = true;
 
-        // 1) Pausar y ocultar HUD
         running = false;
         SetHudVisible(false);
+        HideEndGamePanelIfAny();
+        Time.timeScale = 1f; // por si acaso
 
-        // 2) Mostrar banner de GOOL (si está asignado)
         if (goalUIManager != null)
         {
             goalUIManager.ShowGoal();
             yield return new WaitForSeconds(goalBannerSeconds);
         }
 
-        // 3) Recargar escena para reiniciar layout (pelota, posiciones, etc.)
         var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
         while (!op.isDone) yield return null;
 
-        // 4) Countdown post-gol (bloquea movimiento)
         yield return CountdownCoroutine();
 
-        // 5) Mostrar HUD y reanudar reloj
         SetHudVisible(true);
         running = true;
         handlingGoal = false;
@@ -141,7 +158,6 @@ public class MatchTimer : MonoBehaviour
 
     private IEnumerator CountdownCoroutine()
     {
-        // Activar panel + bloquear movimiento globalmente
         CountdownActive = true;
         if (countdownPanel) countdownPanel.SetActive(true);
 
@@ -154,12 +170,53 @@ public class MatchTimer : MonoBehaviour
             yield return null;
         }
 
-        // Pequeño colchón visual para el "1"
+        // Pequeño colchón para que el "1" se lea
         yield return new WaitForSeconds(0.25f);
 
-        // Desactivar panel + liberar movimiento
         if (countdownPanel) countdownPanel.SetActive(false);
         CountdownActive = false;
+    }
+
+    // ============== FULL TIME ==============
+
+    private void ShowFullTimePanelAndPause()
+    {
+        fullTimeShown = true;
+        CountdownActive = false;
+
+        SetHudVisible(false);
+        if (countdownPanel) countdownPanel.SetActive(false);
+
+        if (endOfGamePanel != null)
+        {
+            ActivateOnlyThisPanel(endOfGamePanel);
+        }
+        else
+        {
+            Debug.LogWarning("MatchTimer: endOfGamePanel no asignado. Asigna tu panel final en el Inspector.");
+        }
+
+        Time.timeScale = 0f;
+    }
+
+    private void ActivateOnlyThisPanel(GameObject panel)
+    {
+        if (panel == null) return;
+
+        Transform parent = panel.transform.parent;
+        if (parent == null) { panel.SetActive(true); return; }
+
+        for (int i = 0; i < parent.childCount; i++)
+            parent.GetChild(i).gameObject.SetActive(false);
+
+        panel.SetActive(true);
+    }
+
+    private void HideEndGamePanelIfAny()
+    {
+        if (endOfGamePanel != null) endOfGamePanel.SetActive(false);
+        fullTimeShown = false;
+        if (Time.timeScale == 0f) Time.timeScale = 1f;
     }
 
     // ============== Helpers ==============
@@ -193,40 +250,39 @@ public class MatchTimer : MonoBehaviour
         if (halfText)  halfText.gameObject.SetActive(visible);
     }
 
-    public static class SceneFlow
-    {
-        public const string MainMenu = "MainMenu";
-        public const string Game     = "Game";
-
-        public static void LoadMenu()
-        {
-            CleanupHUD();
-            Time.timeScale = 1f;
-            UnityEngine.SceneManagement.SceneManager.LoadScene(MainMenu, LoadSceneMode.Single);
-        }
-
-        public static void LoadGame()
-        {
-            Time.timeScale = 1f;
-            UnityEngine.SceneManagement.SceneManager.LoadScene(Game, LoadSceneMode.Single);
-        }
-
-        static void CleanupHUD()
-        {
-            var hud = HudPersist.Instance;
-            if (hud != null)
-            {
-                hud.gameObject.SetActive(false);
-                // O destrúyelo si tu menú tiene su propia UI:
-                // Object.Destroy(hud.gameObject);
-            }
-        }
-    }
+    // ============== Escena cargada ==============
 
     private void OnSceneLoaded(Scene s, LoadSceneMode m)
     {
-        // Si usas un Canvas nuevo por escena, vuelve a enganchar referencias aquí (opcional).
+        // Si venimos del Menú y acabamos de cargar la escena de juego, boot limpio
+        if (PendingNewMatch && s.name == SceneFlow.Game)
+        {
+            PendingNewMatch = false;
+            BootNewMatchAfterLoad();
+        }
+
+        // Asegura textos si recargamos por gol/mitad
         UpdateHalfUI();
         UpdateClockUI();
+    }
+
+    private void BootNewMatchAfterLoad()
+    {
+        // Re-activa HUD persistente si lo apagas en el menú
+        if (HudPersist.Instance != null)
+            HudPersist.Instance.gameObject.SetActive(true);
+
+        // Limpia estado y marcador
+        HideEndGamePanelIfAny();
+        handlingGoal = false;
+        fullTimeShown = false;
+
+        ResetHalf(1);
+        if (ScoreManager.Instance != null)
+            ScoreManager.Instance.ResetScore();
+
+        // Arranca countdown inicial del partido
+        StopAllCoroutines();
+        StartCoroutine(StartFlowWithCountdown());
     }
 }

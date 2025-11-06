@@ -8,6 +8,7 @@ TagManager:
   - Goal
   - PowerUp
   - Enemy
+  - Limit
   layers:
   - Default
   - TransparentFX
@@ -21,7 +22,7 @@ TagManager:
   - Goals
   - Arena
   - Enemy
-  - 
+  - Limit
   - 
   - 
   - 

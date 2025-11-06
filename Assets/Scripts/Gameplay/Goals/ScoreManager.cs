@@ -1,34 +1,61 @@
-// Scripts/Gameplay/Goals/ScoreManager.cs
-using UnityEngine;
 using System;
+using UnityEngine;
 
+[DefaultExecutionOrder(-100)] // Se inicializa antes que la UI
 public class ScoreManager : MonoBehaviour
 {
     public static ScoreManager Instance { get; private set; }
 
-    public int blueGoals { get; private set; }
-    public int redGoals { get; private set; }
+    [Header("Marcador")]
+    public int homeGoals;    // Player
+    public int visitorGoals; // IA
 
     public event Action<int,int> OnScoreChanged;
 
-    void Awake()
+    [Header("Opcional")]
+    [SerializeField] private bool dontDestroyOnLoad = true;
+
+    private void Awake()
     {
-        if (Instance != null) { Destroy(gameObject); return; }
+        if (Instance != null && Instance != this) { Destroy(gameObject); return; }
         Instance = this;
-        DontDestroyOnLoad(gameObject); // opcional si cambias de escena
-    }
-
-    public void AddGoal(TeamId team)
-    {
-        if (team == TeamId.Blue) blueGoals++;
-        else redGoals++;
-
-        OnScoreChanged?.Invoke(blueGoals, redGoals);
+        if (dontDestroyOnLoad) DontDestroyOnLoad(gameObject);
+        Emit();
     }
 
     public void ResetScore()
     {
-        blueGoals = redGoals = 0;
-        OnScoreChanged?.Invoke(blueGoals, redGoals);
+        homeGoals = 0;
+        visitorGoals = 0;
+        Emit();
     }
+
+    public void AddGoalHome()
+    {
+        homeGoals++;
+        Emit();
+    }
+
+    public void AddGoalVisitor()
+    {
+        visitorGoals++;
+        Emit();
+    }
+
+    public void AddGoal(TeamId teamWhoScored)
+    {
+        if (teamWhoScored == TeamId.Blue) AddGoalHome();     // asumiendo Blue=Player
+        else                              AddGoalVisitor();  // Red=IA
+    }
+
+    private void Emit() => OnScoreChanged?.Invoke(homeGoals, visitorGoals);
+
+#if UNITY_EDITOR
+    // Debug rápido: H = gol Home, J = gol Visitor
+    private void Update()
+    {
+        if (Input.GetKeyDown(KeyCode.H)) AddGoalHome();
+        if (Input.GetKeyDown(KeyCode.J)) AddGoalVisitor();
+    }
+#endif
 }

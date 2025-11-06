@@ -19,4 +19,9 @@ public class MainMenuUI : MonoBehaviour
     {
         SceneFlow.LoadMenu();
     }
+
+    public void ExitGame()
+    {
+        Application.Quit();
+    }
 }
