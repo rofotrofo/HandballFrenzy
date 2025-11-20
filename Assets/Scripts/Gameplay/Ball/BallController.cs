@@ -189,6 +189,21 @@ public class BallController : MonoBehaviour
         Take(pc);
         return true;
     }
+    
+    public bool TryPickup(PlayerController pc)
+    {
+        if (IsPossessed) return false;
+
+        if (Time.time < pickupBlockUntil && pc != _intendedReceiver) return false;
+
+        Vector2 a = pc.ballAnchor.position;
+        if (((Vector2)transform.position - a).sqrMagnitude > pickupRadius * pickupRadius) return false;
+
+        Take(pc);
+        return true;
+    }
+    
+    
     // =========================================================
 
     // ----------- API -----------
