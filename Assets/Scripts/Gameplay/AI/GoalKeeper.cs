@@ -5,11 +5,6 @@
 public class GoalkeeperAI : MonoBehaviour
 {
     [Header("Referencias")]
-    [Tooltip("Poste izquierdo del arco (opcional, para límites automáticos)")]
-    public Transform leftPost;
-    
-    [Tooltip("Poste derecho del arco (opcional, para límites automáticos)")]
-    public Transform rightPost;
 
     [Header("Movimiento Lateral")]
     [Tooltip("Velocidad de movimiento del portero")]
@@ -21,6 +16,7 @@ public class GoalkeeperAI : MonoBehaviour
     [Tooltip("Margen de tolerancia al llegar a la posición objetivo (evita jitter)")]
     public float positionTolerance = 0.2f;
 
+    private BallController ball;
     private Rigidbody2D rb;
     private bool initialized = false;
 
@@ -40,7 +36,7 @@ public class GoalkeeperAI : MonoBehaviour
     {
         if (!initialized || !rb) return;
         
-        var ball = BallController.Instance;
+        ball = BallController.Instance;
         if (!ball) 
         {
             rb.linearVelocity = Vector2.zero;
@@ -55,11 +51,11 @@ public class GoalkeeperAI : MonoBehaviour
         }
 
         // Obtener posición X del balón
-        float ballY = ball.transform.position.y;
-        float myY = transform.position.y;
+        var ballY = ball.transform.position.y;
+        var myY = transform.position.y;
         
         // Calcular diferencia
-        float diff = ballY - myY;
+        var diff = ballY - myY;
         
         // Si ya estamos cerca del balón, no moverse
         if (Mathf.Abs(diff) < positionTolerance)
@@ -69,7 +65,7 @@ public class GoalkeeperAI : MonoBehaviour
         }
         
         // Calcular velocidad objetivo (solo en X)
-        float targetVelY = Mathf.Sign(diff) * moveSpeed;
+        var targetVelY = Mathf.Sign(diff) * moveSpeed;
         
         // Limitar movimiento a los bounds
         if (targetVelY < 0 && myY <= movementBounds.x) targetVelY = 0;
@@ -84,8 +80,8 @@ public class GoalkeeperAI : MonoBehaviour
     {
         // Dibujar límites de movimiento
         Gizmos.color = Color.yellow;
-        Vector3 leftBound = new Vector3(transform.position.x, movementBounds.x, 0f);
-        Vector3 rightBound = new Vector3(transform.position.x, movementBounds.y, 0f);
+        var leftBound = new Vector3(transform.position.x, movementBounds.x, 0f);
+        var rightBound = new Vector3(transform.position.x, movementBounds.y, 0f);
         
         Gizmos.DrawLine(leftBound + Vector3.right * 2f, leftBound - Vector3.right * 2f);
         Gizmos.DrawLine(rightBound + Vector3.right * 2f, rightBound - Vector3.right * 2f);
