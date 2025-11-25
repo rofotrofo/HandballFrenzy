@@ -5,26 +5,22 @@ public class OpponentAIBrain : MonoBehaviour
 {
     public PlayerController pc;
 
+    [Header("PERSECUCIÓN")]
+    public float chaseBallSpeed = 1f; // IA mueve usando SetAIMoveInput
+    public float minDistanceToStop = 0.05f;
+
     [Header("Hold y presión")]
-    [Tooltip("Tiempo mínimo y máximo que la IA retiene el balón antes de decidir.")]
     public Vector2 holdBallRange = new Vector2(0.35f, 0.8f);
-    [Tooltip("Si un oponente entra a este radio, aceleramos la decisión (pase/tiro).")]
     public float pressureRadius = 1.15f;
-    [Tooltip("Cooldown entre acciones (evita spam).")]
     public float actionCooldown = 0.5f;
 
     [Header("Tiro")]
-    [Tooltip("Distancia a portería dentro de la cual consideramos tirar.")]
     public float shootDistance = 4.5f;
-    [Tooltip("Qué tan alineado al arco debe estar (cos del ángulo respecto al vector a portería). 1=perfecto, 0=90°")]
     [Range(-1f, 1f)] public float minShotAlignmentCos = 0.15f;
-    [Tooltip("Fuerza base del tiro de IA.")]
     public float shotPower = 1f;
 
     [Header("Pase")]
-    [Tooltip("Ángulo del cono para seleccionar compañero hacia portería.")]
     public float passConeAngle = 28f;
-    [Tooltip("Componente mínima 'hacia adelante' para entrar al cono.")]
     public float passMinForward = 0.0f;
 
     private float _holdUntil = -1f;
@@ -43,48 +39,67 @@ public class OpponentAIBrain : MonoBehaviour
 
         var owner = ball.Owner;
 
-        // Detectar cambio de dueño
+        // 1) SI NO TENGO LA PELOTA → PERSEGUIRLA (pickup automático del BallController)
+        if (owner != pc)
+        {
+            ChaseBall(ball);
+            _holdUntil = -1f;
+            return;
+        }
+
+        // 2) SI SOY DUEÑO → DECIDIR QUÉ HACER
+        HandleBallOwnerLogic(ball);
+    }
+
+    private void ChaseBall(BallController ball)
+    {
+        Vector2 ballPos = ball.transform.position;
+        Vector2 myPos = pc.transform.position;
+
+        Vector2 dir = (ballPos - myPos);
+
+        // evitar vibraciones cuando ya está muy cerca
+        if (dir.magnitude < minDistanceToStop)
+        {
+            pc.SetAIMoveInput(Vector2.zero);
+            return;
+        }
+
+        dir.Normalize();
+        pc.SetAIMoveInput(dir); 
+    }
+
+    private void HandleBallOwnerLogic(BallController ball)
+    {
+        var owner = ball.Owner;
+
+        // Detectar recepción
         if (owner != _lastOwner)
         {
             _lastOwner = owner;
             if (owner == pc)
-            {
-                // Acabamos de recibir: esperar un ratito antes de decidir
                 _holdUntil = Time.time + Random.Range(holdBallRange.x, holdBallRange.y);
-            }
-            else
-            {
-                _holdUntil = -1f;
-            }
         }
 
-        // Si no soy dueño, no hago nada
-        if (owner != pc) return;
-
-        // Si estamos en cuenta regresiva (saque), no hacer nada
         if (MatchTimer.CountdownActive) return;
 
-        bool cooldownReady = (Time.time - _lastActionAt) >= actionCooldown;
-        if (!cooldownReady) return;
+        // cooldown
+        if (Time.time - _lastActionAt < actionCooldown) return;
 
-        // ¿Bajo presión?
         bool underPressure = IsOpponentNear(pressureRadius);
-
-        // ¿Ya pasó el hold o estamos bajo presión?
         bool canDecide = (Time.time >= _holdUntil) || underPressure;
         if (!canDecide) return;
 
-        // ====== TIRO O PASE ======
+        // 1) ¿Tiro a portería?
         if (HasGoodShot(ball))
         {
-            // Tiro a portería (usa los postes configurados en el PlayerController)
-            pc.AIShootAtGoal(spread: 0.10f, power: shotPower);
+            pc.AIShootAtGoal(0.10f, shotPower);
             _lastActionAt = Time.time;
             return;
         }
 
-        // Pase preferente hacia la portería rival
-        Vector2 preferredDir = GoalDirection(ball);
+        // 2) ¿Busco pase?
+        Vector2 preferredDir = GoalDirection();
         pc.AIPass(preferredDir, passConeAngle, passMinForward);
         _lastActionAt = Time.time;
     }
@@ -93,26 +108,25 @@ public class OpponentAIBrain : MonoBehaviour
     {
         if (!pc.leftPost || !pc.rightPost) return false;
 
-        // Punto medio de la portería
         Vector2 mid = 0.5f * ((Vector2)pc.leftPost.position + (Vector2)pc.rightPost.position);
-        Vector2 fromBallToGoal = (mid - (Vector2)ball.transform.position);
-        float dist = fromBallToGoal.magnitude;
-        if (dist > shootDistance) return false;
+        Vector2 toGoal = mid - (Vector2)ball.transform.position;
 
-        // Alineación: si nos estamos moviendo/hacia dónde apuntamos relativo al arco
-        Vector2 facing = (pc.transform.localScale.x >= 0f) ? Vector2.right : Vector2.left; // flip lateral básico
-        float cos = Vector2.Dot(facing.normalized, fromBallToGoal.normalized);
+        if (toGoal.magnitude > shootDistance) return false;
+
+        Vector2 facing = (pc.transform.localScale.x >= 0f) ? Vector2.right : Vector2.left;
+        float cos = Vector2.Dot(facing.normalized, toGoal.normalized);
+
         return cos >= minShotAlignmentCos;
     }
 
-    private Vector2 GoalDirection(BallController ball)
+    private Vector2 GoalDirection()
     {
         if (pc.leftPost && pc.rightPost)
         {
             Vector2 mid = 0.5f * ((Vector2)pc.leftPost.position + (Vector2)pc.rightPost.position);
             return (mid - (Vector2)pc.transform.position).normalized;
         }
-        // fallback: adelante local
+
         return (pc.transform.localScale.x >= 0f) ? Vector2.right : Vector2.left;
     }
 
@@ -122,7 +136,6 @@ public class OpponentAIBrain : MonoBehaviour
         foreach (var p in all)
         {
             if (p == null || p == pc) continue;
-            // Oponente = distinto teamId
             if (!p.teamId.Equals(pc.teamId))
             {
                 if (((Vector2)p.transform.position - (Vector2)pc.transform.position).sqrMagnitude <= radius * radius)

@@ -2315,6 +2315,14 @@ PrefabInstance:
       propertyPath: m_LocalEulerAnglesHint.z
       value: 0
       objectReference: {fileID: 0}
+    - target: {fileID: 8679649771915653213, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
+      propertyPath: m_Size.y
+      value: 4.102156
+      objectReference: {fileID: 0}
+    - target: {fileID: 8679649771915653213, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
+      propertyPath: m_Offset.y
+      value: -1.2939222
+      objectReference: {fileID: 0}
     m_RemovedComponents:
     - {fileID: 3679469540341422658, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
     - {fileID: -7090075101077639637, guid: 764ca952e5446ce42982ee42bd01d1ee, type: 3}
@@ -3642,10 +3650,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 17d2c6c7d244435e8f529f0abb81dda2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  leftPost: {fileID: 2073100154}
-  rightPost: {fileID: 2073100155}
   moveSpeed: 3.5
-  movementBounds: {x: 1.75, y: -2.1}
+  movementBounds: {x: 1.15, y: -1.19}
   positionTolerance: 0.15
 --- !u!1 &1249400637
 GameObject:
@@ -4877,6 +4883,14 @@ PrefabInstance:
       propertyPath: rightPost
       value: 
       objectReference: {fileID: 894455877}
+    - target: {fileID: 3523565965761729095, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: m_Size.y
+      value: 4.2185097
+      objectReference: {fileID: 0}
+    - target: {fileID: 3523565965761729095, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
+      propertyPath: m_Offset.y
+      value: -2.5781446
+      objectReference: {fileID: 0}
     - target: {fileID: 6530885968213115731, guid: 54e382ff4d8871549b4b1b91ac09cd81, type: 3}
       propertyPath: m_LocalPosition.x
       value: 9.27
@@ -4985,10 +4999,8 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 17d2c6c7d244435e8f529f0abb81dda2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  leftPost: {fileID: 1090041082}
-  rightPost: {fileID: 894455877}
   moveSpeed: 3.5
-  movementBounds: {x: -3.12, y: 3.21}
+  movementBounds: {x: -1.27, y: 0.9}
   positionTolerance: 0.15
 --- !u!1 &1860402943
 GameObject:

@@ -15,9 +15,25 @@ public class BallController : MonoBehaviour
     [Header("Stick-to-owner")]
     [Min(0f)] public float stickSmoothing = 25f;
 
-    [Header("Pickup")]
+    // ---------- PICKUP PRO ----------
+    [Header("Pickup PRO")]
     [SerializeField, Min(0f)] private float pickupBlockSeconds = 0.2f;
-    [SerializeField, Min(0f)] private float pickupRadius = 0.35f;   // <= OPCIÓN A: radio para validar cercanía al anchor
+
+    [Tooltip("Radio base para detectar el ballAnchor del jugador")]
+    [SerializeField, Min(0f)] private float pickupRadius = 0.55f;
+
+    [Tooltip("Buffer adicional para recoger la pelota cuando está pegada a pared/limit")]
+    [SerializeField, Min(0f)] private float pickupWallBuffer = 0.15f;
+
+    [Tooltip("Cooldown mínimo para evitar capturas dobles durante rebotes muy rápidos")]
+    [SerializeField, Min(0f)] private float pickupCooldown = 0.05f;
+
+    [Tooltip("Permite recibir pase desde atrás sin girar al jugador")]
+    [SerializeField] private bool allowBackPickup = true;
+
+    private float lastPickupTime = -1f;
+
+    // ----------------------------------------------------------
 
     [Header("Colliders")]
     public Collider2D solidCollider;
@@ -32,26 +48,15 @@ public class BallController : MonoBehaviour
     [SerializeField] private SpriteRenderer spriteRenderer;
     [SerializeField] private Color normalColor = Color.white;
     [SerializeField] private Color stoneColor = new Color(0.6f, 0.6f, 0.6f);
-    [SerializeField] private Color ghostColor = new Color(1f, 0f, 0f); // (compatibilidad)
+    [SerializeField] private Color ghostColor = new Color(1f, 0f, 0f);
 
     // -------- Ghost Ball ----------
-    [Header("Ghost Ball (global/per-collider)")]
-    [Tooltip("Nombre de la capa de la pelota en el proyecto")]
+    [Header("Ghost Ball")]
     public string ballLayerName = "Ball";
-
-    [Tooltip("Capa de enemigos por defecto a ignorar si el pickup no especifica")]
     public string defaultEnemyLayerName = "Enemy";
-
-    [Tooltip("Tag de los enemigos (para ignorar por collider si se activa la opción)")]
     public string enemyTag = "Enemy";
-
-    [Tooltip("Ignorar por collider además de por capa (más robusto si hay hijos con capas distintas)")]
     public bool ghostIgnorePerCollider = true;
-
-    [Tooltip("Antes se apagaba el collider sólido en ghost. Ahora se mantiene para seguir chocando con 'Limit'.")]
     public bool disableSolidColliderDuringGhost = false;
-
-    [Tooltip("Alpha cuando está activa la bola fantasma (feedback)")]
     [Range(0f, 1f)] public float ghostAlpha = 0.45f;
 
     private float _ghostActiveUntil = -1f;
@@ -60,11 +65,8 @@ public class BallController : MonoBehaviour
     private bool _ghostApplied = false;
     private Color _originalColor;
 
-    // Control previo (se conserva por compatibilidad, pero ya no se apaga el sólido)
     private bool _ghostSolidDisabled = false;
     private bool _solidPrevEnabled = true;
-
-    // Registro de ignores por collider para revertir
     private readonly List<Collider2D> _ghostIgnoredEnemyColliders = new();
 
     // -------- Stone Ball ----------
@@ -104,6 +106,9 @@ public class BallController : MonoBehaviour
     private float _passGhostEndsAt = -1f;
     private PlayerController _intendedReceiver = null;
 
+    // -------------------------------------------------------------------
+    // Awake
+    // -------------------------------------------------------------------
     void Awake()
     {
         if (Instance != null && Instance != this) Destroy(gameObject);
@@ -117,12 +122,14 @@ public class BallController : MonoBehaviour
         if (!spriteRenderer) spriteRenderer = GetComponent<SpriteRenderer>();
         if (spriteRenderer) _originalColor = spriteRenderer.color;
 
-        // Cache de capas para Ghost Ball
         _ghostBallLayer = LayerMask.NameToLayer(ballLayerName);
         if (_ghostBallLayer < 0)
-            Debug.LogWarning($"[BallController] La capa '{ballLayerName}' no existe. Revisa Project Settings > Tags & Layers.");
+            Debug.LogWarning($"[BallController] La capa '{ballLayerName}' no existe.");
     }
 
+    // -------------------------------------------------------------------
+    // Update
+    // -------------------------------------------------------------------
     void Update()
     {
         if (IsPossessed && Owner && Owner.ballAnchor)
@@ -135,7 +142,6 @@ public class BallController : MonoBehaviour
         if (_passGhostEndsAt > 0f && Time.time >= _passGhostEndsAt)
             EndPassGhost();
 
-        // Expirar Ghost Ball
         if ((_ghostApplied || _ghostSolidDisabled || _ghostIgnoredEnemyColliders.Count > 0) &&
             _ghostActiveUntil > 0f && Time.time >= _ghostActiveUntil)
         {
@@ -145,13 +151,13 @@ public class BallController : MonoBehaviour
         _ = IsStoneActive();
     }
 
-    // ======= OPCIÓN A: pickup universal por componente =======
+    // -------------------------------------------------------------------
+    // Trigger Events
+    // -------------------------------------------------------------------
     private void OnTriggerEnter2D(Collider2D other)
     {
-        // Intento de pickup primero; si la tomó, no detonamos shockwave
-        if (TryPickup(other)) return;
+        if (TryPickupPRO(other)) return;
 
-        // SHOCKWAVE TRIGGER
         if (shockwaveArmed && !shockwaveRunning)
         {
             if (ignoreOwner && Owner && other.GetComponentInParent<PlayerController>() == Owner)
@@ -163,50 +169,68 @@ public class BallController : MonoBehaviour
 
     private void OnTriggerStay2D(Collider2D other)
     {
-        // Reintenta pickup mientras permanezca dentro del trigger
-        TryPickup(other);
+        TryPickupPRO(other);
     }
 
-    /// <summary>
-    /// Permite que cualquier PlayerController cercano a su ballAnchor tome la bola.
-    /// Respeta el pickupBlockUntil para pases dirigidos.
-    /// </summary>
-    private bool TryPickup(Collider2D col)
+    // -------------------------------------------------------------------
+    // PICKUP PRO SYSTEM
+    // -------------------------------------------------------------------
+    private bool TryPickupPRO(Collider2D col)
     {
-        // Si no permites robos durante posesión, sal si ya hay dueño:
         if (IsPossessed) return false;
 
         var pc = col.GetComponentInParent<PlayerController>();
         if (!pc || !pc.ballAnchor) return false;
 
-        // Si la bola viene de un pase reciente, solo el receptor intencionado puede tomarla
-        if (Time.time < pickupBlockUntil && pc != _intendedReceiver) return false;
+        if (Time.time < pickupBlockUntil && pc != _intendedReceiver)
+            return false;
 
-        // Verifica cercanía real al ballAnchor
-        Vector2 a = pc.ballAnchor.position;
-        if (((Vector2)transform.position - a).sqrMagnitude > pickupRadius * pickupRadius) return false;
+        if (Time.time < lastPickupTime + pickupCooldown)
+            return false;
+
+        Vector2 ballPos = transform.position;
+        Vector2 anchor = pc.ballAnchor.position;
+
+        float radius = pickupRadius;
+
+        if (ContactNearWall(ballPos))
+            radius += pickupWallBuffer;
+
+        if ((ballPos - anchor).sqrMagnitude > radius * radius)
+            return false;
+
+        if (!allowBackPickup)
+        {
+            Vector2 toBall = (ballPos - (Vector2)pc.transform.position).normalized;
+            Vector2 facing = pc.transform.up.normalized;
+
+            if (Vector2.Dot(facing, toBall) < -0.3f)
+                return false;
+        }
 
         Take(pc);
+        lastPickupTime = Time.time;
         return true;
     }
-    
-    public bool TryPickup(PlayerController pc)
+
+    private bool ContactNearWall(Vector2 ballPos)
     {
-        if (IsPossessed) return false;
+        var hits = Physics2D.OverlapCircleAll(ballPos, 0.25f);
+        foreach (var h in hits)
+        {
+            if (!h) continue;
+            if (h.CompareTag("Limit")) return true;
 
-        if (Time.time < pickupBlockUntil && pc != _intendedReceiver) return false;
-
-        Vector2 a = pc.ballAnchor.position;
-        if (((Vector2)transform.position - a).sqrMagnitude > pickupRadius * pickupRadius) return false;
-
-        Take(pc);
-        return true;
+            int limitLayer = LayerMask.NameToLayer("Limit");
+            if (limitLayer >= 0 && h.gameObject.layer == limitLayer)
+                return true;
+        }
+        return false;
     }
-    
-    
-    // =========================================================
 
-    // ----------- API -----------
+    // -------------------------------------------------------------------
+    // TAKE / DROP / PASS / SHOOT
+    // -------------------------------------------------------------------
     public void Take(PlayerController newOwner)
     {
         _lastLinearVelocityBeforeCatch = rb ? rb.linearVelocity : Vector2.zero;
@@ -243,7 +267,7 @@ public class BallController : MonoBehaviour
         pickupBlockUntil = Time.time + pickupBlockSeconds;
         _intendedReceiver = null;
         _lastLaunch = LastLaunch.Pass;
-        if (passer) BeginPassGhost(duration: passGhostMin, players: passer);
+        if (passer) BeginPassGhost(passGhostMin, passer);
         else EndPassGhost();
     }
 
@@ -260,10 +284,11 @@ public class BallController : MonoBehaviour
         OnOwnerChanged?.Invoke(Owner);
         pickupBlockUntil = Time.time + pickupBlockSeconds;
         _intendedReceiver = intendedReceiver;
-        float travelTime = (v > 0f) ? (toTarget.magnitude / v) : 0.0f;
+        float travelTime = (v > 0f) ? (toTarget.magnitude / v) : 0f;
         float ghostDuration = Mathf.Clamp(travelTime + Mathf.Max(0.05f, passGhostExtraBuffer),
                                           passGhostMin, passGhostMax);
         _lastLaunch = LastLaunch.Pass;
+
         if (intendedReceiver || passer)
             BeginPassGhost(ghostDuration, intendedReceiver, passer);
         else
@@ -298,29 +323,30 @@ public class BallController : MonoBehaviour
         _lastLaunch = LastLaunch.None;
     }
 
-    // -------- Helpers ----------
+    // -------------------------------------------------------------------
+    // PHYSICS HELPERS
+    // -------------------------------------------------------------------
     private void SetPossessedPhysics(bool possessed)
     {
         if (triggerCollider && !triggerCollider.isTrigger)
             triggerCollider.isTrigger = true;
+
         if (rb)
         {
             rb.linearVelocity = Vector2.zero;
             rb.angularVelocity = 0f;
             rb.bodyType = possessed ? RigidbodyType2D.Kinematic : RigidbodyType2D.Dynamic;
         }
+
         if (solidCollider)
-        {
-            // Mantener el sólido activo para que siempre colisione con "Limit".
-            // Si Ghost necesitara ignorar algo, se hace por capa/collider selectivo (ver ActivateGhost).
             solidCollider.enabled = !possessed;
-        }
     }
 
     private void BeginPassGhost(float duration, params PlayerController[] players)
     {
         EndPassGhost();
         if (!solidCollider) { _passGhostEndsAt = -1f; return; }
+
         foreach (var p in players)
         {
             if (!p) continue;
@@ -343,21 +369,24 @@ public class BallController : MonoBehaviour
             _passGhostEndsAt = -1f;
             return;
         }
+
         foreach (var c in _temporarilyIgnored)
         {
             if (!c) continue;
             Physics2D.IgnoreCollision(solidCollider, c, false);
         }
+
         _temporarilyIgnored.Clear();
         _passGhostEndsAt = -1f;
     }
 
-    // ---------- API Ghost Ball ----------
+    // -------------------------------------------------------------------
+    // GHOST BALL
+    // -------------------------------------------------------------------
     public void ActivateGhost(float seconds, string enemyLayerName = null)
     {
         if (seconds <= 0f) return;
 
-        // 1) Ignorar por capas (global) contra Enemy, pero NO contra Limit.
         if (_ghostBallLayer < 0)
             _ghostBallLayer = LayerMask.NameToLayer(ballLayerName);
 
@@ -379,16 +408,10 @@ public class BallController : MonoBehaviour
                 _ghostEnemyLayer = enemyLayer;
             }
         }
-        else
-        {
-            Debug.LogWarning($"[BallController] GhostBall: capas no válidas. Ball='{ballLayerName}'({_ghostBallLayer}) Enemy='{layerToUse}'({enemyLayer}). Se usará ignore por collider si está activo.");
-        }
 
-        // 2) Ignorar por collider (opcional) SOLO enemigos (no límites)
         if (ghostIgnorePerCollider)
             ApplyGhostIgnorePerCollider();
 
-        // 3) Feedback visual
         if (spriteRenderer)
         {
             _originalColor = spriteRenderer.color;
@@ -396,11 +419,8 @@ public class BallController : MonoBehaviour
             spriteRenderer.color = c;
         }
 
-        // 4) Antes se apagaba el collider sólido en ghost. YA NO.
-        //    Se mantiene activo para seguir colisionando con "Limit".
         _ghostSolidDisabled = false;
 
-        // 5) Extiende duración
         float until = Time.time + seconds;
         _ghostActiveUntil = Mathf.Max(_ghostActiveUntil, until);
     }
@@ -415,7 +435,6 @@ public class BallController : MonoBehaviour
 
         RevertGhostIgnorePerCollider();
 
-        // Asegurar que el sólido queda como estaba
         if (solidCollider)
         {
             if (_ghostSolidDisabled)
@@ -436,13 +455,14 @@ public class BallController : MonoBehaviour
         foreach (var e in enemies)
         {
             if (!e || !e.activeInHierarchy) continue;
-            var enemyCols = e.GetComponentsInChildren<Collider2D>(includeInactive: false);
+            var enemyCols = e.GetComponentsInChildren<Collider2D>(false);
             foreach (var ec in enemyCols)
             {
                 if (!ec || !ec.enabled) continue;
-                // Ignorar contra el sólido y el trigger, pero NUNCA tocar "Limit".
+
                 if (solidCollider) Physics2D.IgnoreCollision(solidCollider, ec, true);
                 if (triggerCollider) Physics2D.IgnoreCollision(triggerCollider, ec, true);
+
                 _ghostIgnoredEnemyColliders.Add(ec);
             }
         }
@@ -461,7 +481,9 @@ public class BallController : MonoBehaviour
         _ghostIgnoredEnemyColliders.Clear();
     }
 
-    // ---------- Stone ----------
+    // -------------------------------------------------------------------
+    // STONE BALL
+    // -------------------------------------------------------------------
     public void ActivateStoneBall(float duration, float shotMul, float passMul, float receiverImpulse)
     {
         _mode = BallMode.Stone;
@@ -495,18 +517,24 @@ public class BallController : MonoBehaviour
         if (!IsStoneActive()) return;
         if (_lastLaunch != LastLaunch.Pass) return;
         if (!receiver) return;
+
         var recvRb = receiver.GetComponent<Rigidbody2D>();
         if (!recvRb) return;
+
         Vector2 arrival = _lastLinearVelocityBeforeCatch;
         if (arrival.sqrMagnitude < 0.0001f) return;
+
         Vector2 dir = arrival.normalized;
         recvRb.AddForce(dir * _stoneReceiverKnockbackImpulse, ForceMode2D.Impulse);
         recvRb.linearVelocity += dir * (_stoneReceiverKnockbackImpulse / Mathf.Max(0.5f, recvRb.mass));
+
         _lastLaunch = LastLaunch.None;
         _lastLinearVelocityBeforeCatch = Vector2.zero;
     }
 
-    // ---------- Shockwave ----------
+    // -------------------------------------------------------------------
+    // SHOCKWAVE
+    // -------------------------------------------------------------------
     public void ActivateShockwave(float inner, float outer, float dur, float impMax, float impMin, LayerMask mask)
     {
         shockwaveArmed = true;
@@ -545,6 +573,7 @@ public class BallController : MonoBehaviour
     {
         Vector2 center = transform.position;
         if (r1 <= 0f) return;
+
         Collider2D[] hits = (affectMask.value != 0)
             ? Physics2D.OverlapCircleAll(center, r1, affectMask)
             : Physics2D.OverlapCircleAll(center, r1);
@@ -580,6 +609,12 @@ public class BallController : MonoBehaviour
 #if UNITY_EDITOR
     private void OnDrawGizmosSelected()
     {
+        Gizmos.color = new Color(0f, 0.9f, 1f, 0.25f);
+        Gizmos.DrawWireSphere(transform.position, pickupRadius);
+
+        Gizmos.color = new Color(1f, 0.4f, 0.2f, 0.25f);
+        Gizmos.DrawWireSphere(transform.position, pickupRadius + pickupWallBuffer);
+
         if (shockwaveArmed || shockwaveRunning)
         {
             Gizmos.color = new Color(1f, 0.3f, 0.1f, 0.3f);
