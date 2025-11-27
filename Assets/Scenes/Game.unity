@@ -1180,7 +1180,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 2ab8acc1ea5099042b61592231424ee2, type: 3}
   m_Name: 
   m_EditorClassIdentifier: 
-  Target: {fileID: 0}
+  midCourtX: 0
+  leftHalfCenter: {x: 0, y: 0, z: 0}
+  rightHalfCenter: {x: 0, y: 0, z: 0}
   smooth: 10
 --- !u!1 &599693369
 GameObject:
@@ -3653,6 +3655,10 @@ MonoBehaviour:
   moveSpeed: 3.5
   movementBounds: {x: 1.15, y: -1.19}
   positionTolerance: 0.15
+  bounceSpeedMultiplier: 1.1
+  minBounceSpeed: 6
+  randomAngleVariation: 10
+  extraImpulse: 0.5
 --- !u!1 &1249400637
 GameObject:
   m_ObjectHideFlags: 0
@@ -5002,6 +5008,10 @@ MonoBehaviour:
   moveSpeed: 3.5
   movementBounds: {x: -1.27, y: 0.9}
   positionTolerance: 0.15
+  bounceSpeedMultiplier: 1.1
+  minBounceSpeed: 6
+  randomAngleVariation: 10
+  extraImpulse: 0.5
 --- !u!1 &1860402943
 GameObject:
   m_ObjectHideFlags: 0

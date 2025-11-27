@@ -3,35 +3,51 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class CameraFollow : MonoBehaviour
 {
-    [Header("Configuración")]
-    public Transform Target;
-    public float smooth = 10f;
+    [Header("Configuración de Cancha")]
+    public float midCourtX = 0f;     // Línea que divide la cancha en 2 mitades
+    public Vector3 leftHalfCenter;   // Centro de la mitad izquierda
+    public Vector3 rightHalfCenter;  // Centro de la mitad derecha
 
-    void Awake()
-    {
-        // Intentar engancharse al BallController (si existe)
-        if (BallController.Instance)
-            BallController.Instance.OnOwnerChanged += OnBallOwnerChanged;
-    }
+    [Header("Movimiento")]
+    public float smooth = 2f;
 
-    void OnDestroy()
+    private Transform ball;
+
+    void Start()
     {
-        if (BallController.Instance)
-            BallController.Instance.OnOwnerChanged -= OnBallOwnerChanged;
+        ball = BallController.Instance.transform;
+
+        // Valores por default si no los pones en el inspector
+        if (leftHalfCenter == Vector3.zero)
+            leftHalfCenter = new Vector3(-8f, 0f, transform.position.z);
+
+        if (rightHalfCenter == Vector3.zero)
+            rightHalfCenter = new Vector3(8f, 0f, transform.position.z);
     }
 
     void LateUpdate()
     {
-        if (!Target) return;
+        if (!ball) return;
 
-        Vector3 pos = transform.position;
-        Vector3 targetPos = new Vector3(Target.position.x, Target.position.y, pos.z);
-        transform.position = Vector3.Lerp(pos, targetPos, Time.deltaTime * smooth);
-    }
+        Vector3 currentPos = transform.position;
+        Vector3 targetPos;
 
-    private void OnBallOwnerChanged(PlayerController newOwner)
-    {
-        // Si la pelota no tiene dueño (Drop), no seguir a nadie.
-        Target = newOwner ? newOwner.transform : BallController.Instance.transform;
+        // ¿En qué mitad está la pelota?
+        if (ball.position.x < midCourtX)
+        {
+            // MITAD IZQUIERDA
+            targetPos = leftHalfCenter;
+        }
+        else
+        {
+            // MITAD DERECHA
+            targetPos = rightHalfCenter;
+        }
+
+        // Mantener Z
+        targetPos.z = currentPos.z;
+
+        // Movimiento suave tipo “arena deportiva”
+        transform.position = Vector3.Lerp(currentPos, targetPos, Time.deltaTime * smooth);
     }
 }
