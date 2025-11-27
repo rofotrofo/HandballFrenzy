@@ -3,39 +3,25 @@ using UnityEngine;
 [DisallowMultipleComponent]
 public class CameraFollow : MonoBehaviour
 {
-    [Header("Configuración de Cancha")]
-    public float midCourtX = 0f;
-    public Vector3 leftHalfCenter;
-    public Vector3 rightHalfCenter;
-
-    [Header("Movimiento")]
-    public float smooth = 2f;
-
-    [Header("Zona Muerta")]
-    public float deadZoneWidth = 1.5f; 
-    private bool currentlyLeftSide = true;
+    [Header("Target")]
+    public float smooth = 5f; 
+    public Vector2 deadZoneSize = new Vector2(3f, 2f); 
+    // X = ancho de zona muerta | Y = alto
 
     private PlayerController targetPlayer;
+    private Transform cam;
 
     void Start()
     {
-        // Defaults si no están configurados
-        if (leftHalfCenter == Vector3.zero)
-            leftHalfCenter = new Vector3(-8f, 0f, transform.position.z);
-
-        if (rightHalfCenter == Vector3.zero)
-            rightHalfCenter = new Vector3(8f, 0f, transform.position.z);
-
+        cam = transform;
         targetPlayer = PlayerController.CurrentControlled;
 
-        // Determinar mitad inicial
         if (targetPlayer != null)
-            currentlyLeftSide = targetPlayer.transform.position.x < midCourtX;
-
-        // Posicionar cámara en mitad inicial
-        Vector3 startPos = currentlyLeftSide ? leftHalfCenter : rightHalfCenter;
-        startPos.z = transform.position.z;
-        transform.position = startPos;
+        {
+            Vector3 startPos = targetPlayer.transform.position;
+            startPos.z = cam.position.z;
+            cam.position = startPos;
+        }
     }
 
     void LateUpdate()
@@ -43,33 +29,26 @@ public class CameraFollow : MonoBehaviour
         targetPlayer = PlayerController.CurrentControlled;
         if (!targetPlayer) return;
 
-        float px = targetPlayer.transform.position.x;
+        Vector3 camPos = cam.position;
+        Vector3 playerPos = targetPlayer.transform.position;
 
-        // Márgenes de la zona muerta
-        float leftThreshold = midCourtX - deadZoneWidth;
-        float rightThreshold = midCourtX + deadZoneWidth;
+        // Mantener Z
+        playerPos.z = camPos.z;
 
-        // Lógico: solo cambiar mitad si sale de la zona muerta
-        if (currentlyLeftSide)
-        {
-            // Si estaba a la izquierda, solo cambiar si pasa de rightThreshold
-            if (px > rightThreshold)
-                currentlyLeftSide = false;
-        }
-        else
-        {
-            // Si estaba a la derecha, solo cambiar si pasa de leftThreshold
-            if (px < leftThreshold)
-                currentlyLeftSide = true;
-        }
+        // === Zona muerta ===
+        float dx = playerPos.x - camPos.x;
+        float dy = playerPos.y - camPos.y;
 
-        // Elegir posición objetivo según la mitad actual
-        Vector3 currentPos = transform.position;
-        Vector3 targetPos = currentlyLeftSide ? leftHalfCenter : rightHalfCenter;
+        bool outX = Mathf.Abs(dx) > deadZoneSize.x;
+        bool outY = Mathf.Abs(dy) > deadZoneSize.y;
 
-        targetPos.z = currentPos.z;
+        Vector3 targetPos = camPos;
+
+        // Solo mover cámara si el jugador sale del rectángulo muerto
+        if (outX) targetPos.x = playerPos.x - Mathf.Sign(dx) * deadZoneSize.x;
+        if (outY) targetPos.y = playerPos.y - Mathf.Sign(dy) * deadZoneSize.y;
 
         // Movimiento suave
-        transform.position = Vector3.Lerp(currentPos, targetPos, Time.deltaTime * smooth);
+        cam.position = Vector3.Lerp(camPos, targetPos, Time.deltaTime * smooth);
     }
 }
