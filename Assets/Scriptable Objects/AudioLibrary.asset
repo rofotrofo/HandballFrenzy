@@ -1,0 +1,23 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 9026677ad4da6ce489f6389bcf20d4b0, type: 3}
+  m_Name: AudioLibrary
+  m_EditorClassIdentifier: 
+  _audioData:
+  - audio: {fileID: 8300000, guid: f504e10afb04319449a99e88bd51f9bb, type: 3}
+    audioName: MainMenu
+  - audio: {fileID: 8300000, guid: fa990c70f398d4b4d9ccbdc35a8ba2ce, type: 3}
+    audioName: Arena1
+  - audio: {fileID: 8300000, guid: db1fc349f9ae88a45bfe1eacd7234e99, type: 3}
+    audioName: IceArena
+  - audio: {fileID: 8300000, guid: 114960d03394bbd48a7c2885ce5f0c91, type: 3}
+    audioName: SandArena

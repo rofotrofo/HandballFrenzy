@@ -100,6 +100,10 @@ public class BallController : MonoBehaviour
     private float _passGhostEndsAt = -1f;
     private PlayerController _intendedReceiver = null;
 
+    // PAUSE
+    private bool _isPaused = false;
+    private Coroutine _currentShockwaveCoroutine;
+
     // -------------------------------------------------------------------
     // Awake
     // -------------------------------------------------------------------
@@ -119,11 +123,25 @@ public class BallController : MonoBehaviour
         _ghostBallLayer = LayerMask.NameToLayer(ballLayerName);
     }
 
+    private void Start()
+    {
+        GameStateManager.Source.OnGamePaused += OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
+    }
+
+    private void OnDestroy()
+    {
+        GameStateManager.Source.OnGamePaused -= OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
+    }
+
     // -------------------------------------------------------------------
     // Update
     // -------------------------------------------------------------------
     void Update()
     {
+        if (_isPaused) return;
+
         if (IsPossessed && Owner && Owner.ballAnchor)
         {
             Vector3 target = Owner.ballAnchor.position;
@@ -148,6 +166,7 @@ public class BallController : MonoBehaviour
     // -------------------------------------------------------------------
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (_isPaused) return;
         if (TryPickupSmart(other)) return;
 
         if (shockwaveArmed && !shockwaveRunning)
@@ -161,6 +180,7 @@ public class BallController : MonoBehaviour
 
     private void OnTriggerStay2D(Collider2D other)
     {
+        if(_isPaused) return;
         TryPickupSmart(other);
     }
 
@@ -568,6 +588,14 @@ public class BallController : MonoBehaviour
 
         while (elapsed < shockwaveDuration)
         {
+            if (_isPaused)
+            {
+                yield return new WaitUntil(() => !_isPaused);
+                // Recalcular el tiempo restante después de pausa
+                elapsed += Time.deltaTime;
+                continue;
+            }
+
             float k = elapsed / shockwaveDuration;
             float currR = Mathf.Lerp(innerRadius, outerRadius, k);
 
@@ -578,9 +606,39 @@ public class BallController : MonoBehaviour
             yield return null;
         }
 
-        ApplyShockwaveRing(prevR, outerRadius);
+        if (!_isPaused)
+        {
+            ApplyShockwaveRing(prevR, outerRadius);
+        }
+
         shockwaveRunning = false;
+        _currentShockwaveCoroutine = null;
     }
+
+    #region PAUSE LOGIC
+    private void OnGamePaused()
+    {
+        _isPaused = true;
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.angularVelocity = 0f;
+        }
+
+        if (_currentShockwaveCoroutine != null)
+        {
+            StopCoroutine(_currentShockwaveCoroutine);
+            _currentShockwaveCoroutine = null;
+            shockwaveRunning = false;
+        }
+    }
+
+    private void OnGameUnpaused()
+    {
+        _isPaused = false;
+    }
+    #endregion
 
     private void ApplyShockwaveRing(float r0, float r1)
     {

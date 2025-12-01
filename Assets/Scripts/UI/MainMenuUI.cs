@@ -6,6 +6,7 @@ public class MainMenuUI : MonoBehaviour
     public void PlayGame()
     {
         SceneFlow.LoadGame();
+        GameStateManager.Source.ChangeState(GameState.OnPlay);
     }
 
     // llamado por el botón "Salir"

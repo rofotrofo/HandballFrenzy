@@ -25,16 +25,51 @@ public class PowerUpSpawner : MonoBehaviour
     private Coroutine halfRoutine;
     private int spawnedThisHalf = 0;
 
+    private bool _isPaused = false;
+    private float _elapsedTimeThisHalf = 0f;
+
     void Start()
     {
+        GameStateManager.Source.OnGamePaused += OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
+
         if (autoStartForTesting)
             StartHalf();
     }
+
+    private void OnDestroy()
+    {
+        GameStateManager.Source.OnGamePaused -= OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
+    }
+
+    #region PAUSE LOGIC
+    private void OnGamePaused()
+    {
+        _isPaused = true;
+    }
+
+    private void OnGameUnpaused()
+    {
+        _isPaused = false;
+    }
+
+    public bool IsSpawningActive()
+    {
+        return halfRoutine != null && !_isPaused;
+    }
+
+    public float GetHalfProgress()
+    {
+        return Mathf.Clamp01(_elapsedTimeThisHalf / halfDurationSeconds);
+    }
+    #endregion
 
     public void StartHalf()
     {
         StopHalf();
         spawnedThisHalf = 0;
+        _elapsedTimeThisHalf = 0f;
         halfRoutine = StartCoroutine(HalfLoop());
     }
 
@@ -51,26 +86,40 @@ public class PowerUpSpawner : MonoBehaviour
     {
         float t = 0f;
 
-        if (spawnImmediatelyOnHalfStart)
+        if (spawnImmediatelyOnHalfStart && !_isPaused)
             TrySpawnOnce();
 
         while (t < halfDurationSeconds)
         {
-            yield return new WaitForSeconds(spawnIntervalSeconds);
-            t += spawnIntervalSeconds;
-            TrySpawnOnce();
+            float waitTime = spawnIntervalSeconds;
+            while (waitTime > 0f)
+            {
+                if (!_isPaused)
+                {
+                    waitTime -= Time.deltaTime;
+                    t += Time.deltaTime;
+                    _elapsedTimeThisHalf = t;
+                }
+                yield return null;
+            }
+
+            if (!_isPaused)
+                TrySpawnOnce();
         }
 
-        int needed = Mathf.Max(0, minSpawnsPerHalf - spawnedThisHalf);
-        for (int i = 0; i < needed; i++)
+        if (!_isPaused)
         {
-            if (!TrySpawnOnce()) break;
+            int needed = Mathf.Max(0, minSpawnsPerHalf - spawnedThisHalf);
+            for (int i = 0; i < needed; i++)
+            {
+                if (!TrySpawnOnce()) break;
+            }
         }
     }
 
     private bool TrySpawnOnce()
     {
-        if (powerUpPrefabs.Count == 0 || spawnPoints.Count == 0)
+        if (powerUpPrefabs.Count == 0 || spawnPoints.Count == 0 || _isPaused)
             return false;
 
         List<Transform> free = new List<Transform>();
