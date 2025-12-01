@@ -41,6 +41,8 @@ public class MatchTimer : MonoBehaviour
     private bool handlingGoal = false;
     private bool fullTimeShown = false;
 
+    private bool _isPaused = false;
+
     void Awake()
     {
         if (Instance != null && Instance != this) { Destroy(gameObject); return; }
@@ -53,6 +55,10 @@ public class MatchTimer : MonoBehaviour
     {
         if (Instance == this) Instance = null;
         SceneManager.sceneLoaded -= OnSceneLoaded;
+
+        GameStateManager.Source.OnGamePaused -= OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
+        GameStateManager.Source.OnGameStateChanged -= OnGameStateChanged;
     }
 
     void Start()
@@ -61,11 +67,15 @@ public class MatchTimer : MonoBehaviour
         ResetHalf(1);
         HideEndGamePanelIfAny();
         StartCoroutine(StartFlowWithCountdown());
+
+        GameStateManager.Source.OnGamePaused += OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
+        GameStateManager.Source.OnGameStateChanged += OnGameStateChanged;
     }
 
     void Update()
     {
-        if (!running || fullTimeShown) return;
+        if (!running || fullTimeShown || _isPaused) return;
 
         timeLeft -= Time.deltaTime;
         if (timeLeft < 0f) timeLeft = 0f;
@@ -88,11 +98,32 @@ public class MatchTimer : MonoBehaviour
         }
     }
 
+    #region PAUSE LOGIC
+    private void OnGamePaused()
+    {
+        _isPaused = true;
+    }
+
+    private void OnGameUnpaused()
+    {
+        _isPaused = false;
+    }
+
+    private void OnGameStateChanged(GameState newState)
+    {
+        if (newState == GameState.OnGameOver)
+        {
+            running = false;
+            _isPaused = true;
+        }
+    }
+    #endregion
+
     // ================= API =================
 
     public void OnGoalScored()
     {
-        if (handlingGoal || fullTimeShown) return;
+        if (handlingGoal || fullTimeShown || _isPaused) return;
         StartCoroutine(GoalFlow());
     }
 

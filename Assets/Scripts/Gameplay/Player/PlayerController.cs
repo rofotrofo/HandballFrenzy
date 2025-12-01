@@ -65,6 +65,9 @@ public class PlayerController : MonoBehaviour
     private static TeamId _humanTeamId;
     private static bool _humanTeamSet = false;
 
+    // PAUSE LOGIC
+    private bool _isPaused = false;
+
     // ===================== R O U T E R   D E   I N P U T   G L O B A L =====================
 
     /// <summary>
@@ -128,7 +131,36 @@ public class PlayerController : MonoBehaviour
         }
     }
 
-    void OnDestroy() => TeamRegistry.Unregister(this);
+    private void Start()
+    {
+        GameStateManager.Source.OnGamePaused += OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
+    }
+
+    private void OnDestroy()
+    {
+        TeamRegistry.Unregister(this);
+        GameStateManager.Source.OnGamePaused -= OnGamePaused;
+        GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
+    }
+
+    #region PAUSE LOGIC
+    private void OnGamePaused()
+    {
+        _isPaused = true;
+
+        if (isAiming)
+            CancelAimShot();
+
+        if (rb != null)
+            rb.linearVelocity = Vector2.zero;
+    }
+
+    private void OnGameUnpaused()
+    {
+        _isPaused = false;
+    }
+    #endregion
 
     // Input de movimiento (WASD) si te siguen llamando por instancia (back-compat).
     // Lo dejamos, pero la recomendación es usar SetGlobalMoveInput.
@@ -152,6 +184,7 @@ public class PlayerController : MonoBehaviour
 
     void Update()
     {
+        if (_isPaused) return;
         // 1) Auto-switch de control al receptor de tu equipo al cambiar posesión real
         var ball = BallController.Instance;
         var owner = (ball != null) ? ball.Owner : null;
@@ -224,7 +257,7 @@ public class PlayerController : MonoBehaviour
 
     void FixedUpdate()
     {
-        if (MatchTimer.CountdownActive)
+        if (MatchTimer.CountdownActive || _isPaused)
         {
             rb.linearVelocity = Vector2.zero;
             return;
@@ -304,7 +337,7 @@ public class PlayerController : MonoBehaviour
 
     public void ActionPass()
     {
-        if (this != CurrentControlled) return;
+        if (this != CurrentControlled || _isPaused) return;
 
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
@@ -342,7 +375,7 @@ public class PlayerController : MonoBehaviour
 
     public void ActionDrop()
     {
-        if (this != CurrentControlled) return;
+        if (this != CurrentControlled || _isPaused) return;
 
         var ball = BallController.Instance;
         if (!ball || ball.Owner != this) return;
@@ -361,6 +394,7 @@ public class PlayerController : MonoBehaviour
     private void BeginAimShot()
     {
         var ball = BallController.Instance;
+        if (_isPaused) return;
         if (!ball || ball.Owner != this) return;
         if (!leftPost || !rightPost || !aimArrow) return;
 
