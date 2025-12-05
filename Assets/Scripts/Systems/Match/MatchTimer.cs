@@ -265,11 +265,11 @@ public class MatchTimer : MonoBehaviour
 
         string resultMessage = "";
         if (playerWon)
-            resultMessage = "VICTORY!";
+            resultMessage = "VICTORY".Localize();
         else if (isDraw)
-            resultMessage = "DRAW";
+            resultMessage = "DRAW".Localize();
         else
-            resultMessage = "LOST";
+            resultMessage = "LOSE".Localize();
 
         if (_resultText != null)
             _resultText.text = resultMessage;
@@ -284,7 +284,7 @@ public class MatchTimer : MonoBehaviour
 
             if (showNextMatch)
             {
-                string buttonText = (_currentArenaIndex == 1) ? "END GAME" : "NEXT MATCH";
+                string buttonText = (_currentArenaIndex == 1) ? "FINAL MATCH".Localize() : "NEXT MATCH".Localize();
                 var textComp = _nextMatchButton.GetComponentInChildren<TMP_Text>();
                 if (textComp != null)
                     textComp.text = buttonText;
