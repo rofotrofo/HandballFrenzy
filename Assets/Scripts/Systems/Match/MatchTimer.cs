@@ -2,6 +2,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 using TMPro;
 using System.Collections;
+using UnityEngine.UI;
 
 [DisallowMultipleComponent]
 public class MatchTimer : MonoBehaviour
@@ -10,7 +11,6 @@ public class MatchTimer : MonoBehaviour
 
     public static bool CountdownActive { get; private set; } = false;
 
-    // Bandera para arrancar un partido “desde cero” al cargar la escena de juego
     public static bool PendingNewMatch = false;
 
     [Header("Duraciones")]
@@ -22,25 +22,37 @@ public class MatchTimer : MonoBehaviour
     public float goalBannerSeconds = 1.5f;
 
     [Header("HUD (Canvas actual)")]
-    public TMP_Text clockText;        // mm:ss
-    public TMP_Text halfText;         // "1H" / "2H"
-    public GameObject countdownPanel; // panel centrado
-    public TMP_Text countdownText;    // 3..2..1..
+    public TMP_Text clockText;        
+    public TMP_Text halfText;        
+    public GameObject countdownPanel; 
+    public TMP_Text countdownText;
+    public GameObject scorePanel;
+    public GameObject pauseButton;
+    public GameObject scoreUI;
 
     [Header("Fin de juego")]
     [Tooltip("Panel de Fin de Juego (desactivado por defecto) que quieres mostrar en Full Time.")]
     public GameObject endOfGamePanel;
 
+    [Header("Botones en el Panel Final")]
+    [SerializeField] private Button _nextMatchButton;
+    [SerializeField] private Button _menuButton;
+    [SerializeField] private TMP_Text _resultText;
+    [SerializeField] private TMP_Text _scoreText;
+
     [Header("Opcional: usar GoalUIManager si ya lo tienes")]
     public GoalUIManager goalUIManager;
 
+    [Header("Configuración de Arenas")]
+    [SerializeField] private TeamId _playerTeamId = TeamId.Blue; // Asume que Blue es el jugador
+    private int _currentArenaIndex = 0; // 0: Wood, 1: Ice, 2: Sand
+
     // Estado
-    private int currentHalf = 1;      // 1 o 2
-    private float timeLeft;           // tiempo restante de la mitad
-    private bool running = false;     // el reloj corre
+    private int currentHalf = 1;     
+    private float timeLeft;           
+    private bool running = false;     
     private bool handlingGoal = false;
     private bool fullTimeShown = false;
-
     private bool _isPaused = false;
 
     void Awake()
@@ -56,21 +68,32 @@ public class MatchTimer : MonoBehaviour
         if (Instance == this) Instance = null;
         SceneManager.sceneLoaded -= OnSceneLoaded;
 
-        GameStateManager.Source.OnGamePaused -= OnGamePaused;
-        GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
-        GameStateManager.Source.OnGameStateChanged -= OnGameStateChanged;
+        if (GameStateManager.Source != null)
+        {
+            GameStateManager.Source.OnGamePaused -= OnGamePaused;
+            GameStateManager.Source.OnGameUnpaused -= OnGameUnpaused;
+            GameStateManager.Source.OnGameStateChanged -= OnGameStateChanged;
+        }
     }
 
     void Start()
     {
-        // Primer arranque (si la escena de juego abre con este objeto presente)
         ResetHalf(1);
         HideEndGamePanelIfAny();
         StartCoroutine(StartFlowWithCountdown());
 
-        GameStateManager.Source.OnGamePaused += OnGamePaused;
-        GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
-        GameStateManager.Source.OnGameStateChanged += OnGameStateChanged;
+        if (GameStateManager.Source != null)
+        {
+            GameStateManager.Source.OnGamePaused += OnGamePaused;
+            GameStateManager.Source.OnGameUnpaused += OnGameUnpaused;
+            GameStateManager.Source.OnGameStateChanged += OnGameStateChanged;
+        }
+
+        if (_nextMatchButton != null)
+            _nextMatchButton.onClick.AddListener(StartNextMatch);
+
+        if (_menuButton != null)
+            _menuButton.onClick.AddListener(ReturnToMenu);
     }
 
     void Update()
@@ -87,12 +110,10 @@ public class MatchTimer : MonoBehaviour
             running = false;
             if (currentHalf == 1)
             {
-                // Fin 1H → recarga y arranca 2H con countdown
                 StartCoroutine(HalfFlow(2));
             }
             else
             {
-                // FULL TIME → pausa y panel final
                 ShowFullTimePanelAndPause();
             }
         }
@@ -119,15 +140,11 @@ public class MatchTimer : MonoBehaviour
     }
     #endregion
 
-    // ================= API =================
-
     public void OnGoalScored()
     {
         if (handlingGoal || fullTimeShown || _isPaused) return;
         StartCoroutine(GoalFlow());
     }
-
-    // =============== Flujos ===============
 
     private IEnumerator StartFlowWithCountdown()
     {
@@ -135,10 +152,12 @@ public class MatchTimer : MonoBehaviour
         SetHudVisible(false);
         yield return CountdownCoroutine();
         SetHudVisible(true);
+        pauseButton.SetActive(true);
+        scorePanel.SetActive(true);
+        scoreUI.SetActive(true);
         running = true;
     }
 
-    /// Flujo al terminar una mitad (recarga escena, arranca siguiente mitad).
     private IEnumerator HalfFlow(int nextHalf)
     {
         handlingGoal = true;
@@ -146,11 +165,13 @@ public class MatchTimer : MonoBehaviour
         running = false;
         SetHudVisible(false);
         HideEndGamePanelIfAny();
-        Time.timeScale = 1f; // por si acaso
+        Time.timeScale = 1f;
 
-        // Recarga la misma escena para resetear posiciones/bola
         var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
         while (!op.isDone) yield return null;
+
+        yield return null;
+        ReconnectReferencesAfterSceneLoad();
 
         ResetHalf(nextHalf);
         UpdateHalfUI();
@@ -169,7 +190,7 @@ public class MatchTimer : MonoBehaviour
         running = false;
         SetHudVisible(false);
         HideEndGamePanelIfAny();
-        Time.timeScale = 1f; // por si acaso
+        Time.timeScale = 1f;
 
         if (goalUIManager != null)
         {
@@ -179,6 +200,10 @@ public class MatchTimer : MonoBehaviour
 
         var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
         while (!op.isDone) yield return null;
+
+        yield return null;
+
+        ReconnectReferencesAfterSceneLoad();
 
         yield return CountdownCoroutine();
 
@@ -201,14 +226,11 @@ public class MatchTimer : MonoBehaviour
             yield return null;
         }
 
-        // Pequeño colchón para que el "1" se lea
         yield return new WaitForSeconds(0.25f);
 
         if (countdownPanel) countdownPanel.SetActive(false);
         CountdownActive = false;
     }
-
-    // ============== FULL TIME ==============
 
     private void ShowFullTimePanelAndPause()
     {
@@ -221,6 +243,7 @@ public class MatchTimer : MonoBehaviour
         if (endOfGamePanel != null)
         {
             ActivateOnlyThisPanel(endOfGamePanel);
+            ShowGameResult();
         }
         else
         {
@@ -228,6 +251,136 @@ public class MatchTimer : MonoBehaviour
         }
 
         Time.timeScale = 0f;
+    }
+
+    private void ShowGameResult()
+    {
+        if (ScoreManager.Instance == null) return;
+
+        int playerScore = ScoreManager.Instance.homeGoals;
+        int enemyScore = ScoreManager.Instance.visitorGoals;
+
+        bool playerWon = playerScore > enemyScore;
+        bool isDraw = playerScore == enemyScore;
+
+        string resultMessage = "";
+        if (playerWon)
+            resultMessage = "VICTORY!";
+        else if (isDraw)
+            resultMessage = "DRAW";
+        else
+            resultMessage = "LOST";
+
+        if (_resultText != null)
+            _resultText.text = resultMessage;
+
+        if (_scoreText != null)
+            _scoreText.text = $"{playerScore} - {enemyScore}";
+
+        if (_nextMatchButton != null)
+        {
+            bool showNextMatch = playerWon && (_currentArenaIndex < 2);
+            _nextMatchButton.gameObject.SetActive(showNextMatch);
+
+            if (showNextMatch)
+            {
+                string buttonText = (_currentArenaIndex == 1) ? "END GAME" : "NEXT MATCH";
+                var textComp = _nextMatchButton.GetComponentInChildren<TMP_Text>();
+                if (textComp != null)
+                    textComp.text = buttonText;
+            }
+        }
+
+        if (_menuButton != null)
+            _menuButton.gameObject.SetActive(true);
+    }
+
+    private void StartNextMatch()
+    {
+        if (ArenaManager.Instance == null || _currentArenaIndex >= 2)
+        {
+            Debug.LogError("No se puede avanzar: ArenaManager no encontrado o es la última arena");
+            return;
+        }
+
+        _currentArenaIndex++;
+
+        ArenaManager.ArenaType nextArena = ArenaManager.ArenaType.Wood;
+        switch (_currentArenaIndex)
+        {
+            case 0: nextArena = ArenaManager.ArenaType.Wood; break;
+            case 1: nextArena = ArenaManager.ArenaType.Ice; break;
+            case 2: nextArena = ArenaManager.ArenaType.Sand; break;
+        }
+
+        Debug.Log($"Cargando siguiente arena: {nextArena}");
+
+        ArenaManager.Instance.startArena = nextArena;
+
+        StartCoroutine(ReloadSceneForNewMatch());
+    }
+
+    private IEnumerator ReloadSceneForNewMatch()
+    {
+        fullTimeShown = false;
+        _isPaused = false;
+
+        HideEndGamePanelIfAny();
+
+        if (ScoreManager.Instance != null)
+            ScoreManager.Instance.ResetScore();
+
+        ResetHalf(1);
+        running = false;
+
+        if (GameStateManager.Source != null)
+        {
+            GameStateManager.Source.ChangeState(GameState.OnPlay);
+        }
+
+        Time.timeScale = 1f;
+
+        var op = SceneManager.LoadSceneAsync(SceneManager.GetActiveScene().buildIndex, LoadSceneMode.Single);
+
+        while (!op.isDone) yield return null;
+
+        yield return null;
+
+        ReconnectReferencesAfterSceneLoad();
+        StartCoroutine(StartFlowWithCountdown());
+    }
+
+    private void ReturnToMenu()
+    {
+        CleanupPersistentObjects();
+
+        if (ArenaManager.Instance != null)
+        {
+            ArenaManager.Instance.ResetToInitialState();
+        }
+
+        SceneManager.LoadScene("MainMenu");
+    }
+
+    private void CleanupPersistentObjects()
+    {
+        if (Instance == this)
+        {
+            Instance = null;
+            Destroy(gameObject);
+        }
+
+        if (ScoreManager.Instance != null)
+        {
+            var scoreObj = ScoreManager.Instance.gameObject;
+            if (scoreObj.scene.buildIndex == -1)
+                Destroy(scoreObj);
+        }
+
+        if (HudPersist.Instance != null)
+        {
+            Destroy(HudPersist.Instance.gameObject);
+        }
     }
 
     private void ActivateOnlyThisPanel(GameObject panel)
@@ -245,12 +398,18 @@ public class MatchTimer : MonoBehaviour
 
     private void HideEndGamePanelIfAny()
     {
-        if (endOfGamePanel != null) endOfGamePanel.SetActive(false);
+        if (endOfGamePanel != null)
+        {
+            endOfGamePanel.SetActive(false);
+
+            if (_nextMatchButton != null)
+                _nextMatchButton.gameObject.SetActive(false);
+            if (_menuButton != null)
+                _menuButton.gameObject.SetActive(false);
+        }
         fullTimeShown = false;
         if (Time.timeScale == 0f) Time.timeScale = 1f;
     }
-
-    // ============== Helpers ==============
 
     private void ResetHalf(int halfIndex)
     {
@@ -278,32 +437,65 @@ public class MatchTimer : MonoBehaviour
     private void SetHudVisible(bool visible)
     {
         if (clockText) clockText.gameObject.SetActive(visible);
-        if (halfText)  halfText.gameObject.SetActive(visible);
+        if (halfText) halfText.gameObject.SetActive(visible);
     }
-
-    // ============== Escena cargada ==============
 
     private void OnSceneLoaded(Scene s, LoadSceneMode m)
     {
-        // Si venimos del Menú y acabamos de cargar la escena de juego, boot limpio
         if (PendingNewMatch && s.name == SceneFlow.Game)
         {
             PendingNewMatch = false;
             BootNewMatchAfterLoad();
         }
 
-        // Asegura textos si recargamos por gol/mitad
+        ReconnectReferencesAfterSceneLoad();
+
         UpdateHalfUI();
         UpdateClockUI();
     }
 
+    private void ReconnectReferencesAfterSceneLoad()
+    {
+        var clockTextObj = GameObject.Find("ClockText");
+        var halfTextObj = GameObject.Find("HalfText");
+        var countdownPanelObj = GameObject.Find("CountdownPanel");
+        var countdownTextObj = GameObject.Find("CountdownText");
+        var endOfGamePanelObj = GameObject.Find("EndOfGamePanel");
+
+        if (clockTextObj) clockText = clockTextObj.GetComponent<TMP_Text>();
+        if (halfTextObj) halfText = halfTextObj.GetComponent<TMP_Text>();
+        if (countdownPanelObj) countdownPanel = countdownPanelObj;
+        if (countdownTextObj) countdownText = countdownTextObj.GetComponent<TMP_Text>();
+        if (endOfGamePanelObj)
+        {
+            endOfGamePanel = endOfGamePanelObj;
+
+            _nextMatchButton = endOfGamePanel.transform.Find("NextMatchButton")?.GetComponent<Button>();
+            _menuButton = endOfGamePanel.transform.Find("MenuButton")?.GetComponent<Button>();
+            _resultText = endOfGamePanel.transform.Find("ResultText")?.GetComponent<TMP_Text>();
+            _scoreText = endOfGamePanel.transform.Find("ScoreText")?.GetComponent<TMP_Text>();
+
+            if (_nextMatchButton != null)
+            {
+                _nextMatchButton.onClick.RemoveAllListeners();
+                _nextMatchButton.onClick.AddListener(StartNextMatch);
+            }
+
+            if (_menuButton != null)
+            {
+                _menuButton.onClick.RemoveAllListeners();
+                _menuButton.onClick.AddListener(ReturnToMenu);
+            }
+        }
+    }
+
     private void BootNewMatchAfterLoad()
     {
-        // Re-activa HUD persistente si lo apagas en el menú
+        _currentArenaIndex = 0;
+
         if (HudPersist.Instance != null)
             HudPersist.Instance.gameObject.SetActive(true);
 
-        // Limpia estado y marcador
         HideEndGamePanelIfAny();
         handlingGoal = false;
         fullTimeShown = false;
@@ -312,7 +504,6 @@ public class MatchTimer : MonoBehaviour
         if (ScoreManager.Instance != null)
             ScoreManager.Instance.ResetScore();
 
-        // Arranca countdown inicial del partido
         StopAllCoroutines();
         StartCoroutine(StartFlowWithCountdown());
     }
