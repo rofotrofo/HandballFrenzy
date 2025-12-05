@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -23,6 +24,8 @@ public class ArenaManager : MonoBehaviour
     private ArenaType _initialArena;
 
     GameObject _currentArena;
+
+    public event Action<ArenaType> OnArenaChanged;
 
     public static ArenaManager Instance { get; private set; }
 
@@ -123,6 +126,7 @@ public class ArenaManager : MonoBehaviour
         _currentArena = Instantiate(prefab, pos, rot);
 
         Debug.Log($"Arena cargada: {type}");
+        OnArenaChanged?.Invoke(type);
     }
 
     public ArenaType GetCurrentArenaType()
